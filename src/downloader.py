@@ -60,11 +60,12 @@ class TileDownloader:
         self,
         provider_name: str,
         output_dir: str = "tiles",
-        max_threads: int = 4,
-        retries: int = 3,
-        delay: float = 0.1,
+        max_threads: int = 8,  # 增加默认线程数到8
+        retries: int = 2,      # 减少重试次数到2
+        delay: float = 0.05,   # 减少延迟到0.05秒
         timeout: int = 10,
-        is_tms: bool = False
+        is_tms: bool = False,
+        progress_callback: callable = None
     ):
         try:
             self.provider: TileProvider = ProviderManager.get_provider(provider_name)
@@ -86,6 +87,8 @@ class TileDownloader:
             self.failed_count = 0
             self.skipped_count = 0
             self.total_tasks = 0
+            self.total_bytes = 0  # 添加total_bytes属性，用于统计下载的总字节数
+            self.progress_callback = progress_callback
 
             # 创建输出目录
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -141,13 +144,18 @@ class TileDownloader:
             logger.info(f"开始下载，线程数={self.max_threads}，provider={self.provider.name}")
             
             # 计算实际需要的线程数
-            actual_threads = min(
+            # 基础线程数：不超过配置的最大线程数、不超过任务数、不超过系统CPU核心数*2
+            cpu_cores = os.cpu_count() or 4
+            base_threads = min(
                 self.max_threads, 
                 self.task_queue.qsize(), 
+                cpu_cores * 2,  # 根据CPU核心数动态调整，充分利用系统资源
                 32  # 限制最大线程数为32，避免资源耗尽
             )
+            # 确保至少有1个线程
+            actual_threads = max(1, base_threads)
             
-            logger.info(f"实际使用线程数: {actual_threads}")
+            logger.info(f"实际使用线程数: {actual_threads}, CPU核心数: {cpu_cores}")
             
             threads = []
             
@@ -172,6 +180,10 @@ class TileDownloader:
                 f"结束下载: 成功={self.downloaded_count}, 失败={self.failed_count}, "
                 f"跳过={self.skipped_count}, 总计={self.total_tasks}"
             )
+            
+            # 下载完成后调用进度回调
+            if self.progress_callback:
+                self.progress_callback(self.downloaded_count, self.total_tasks, self.total_bytes)
         except Exception as e:
             logger.error(f"下载过程中发生异常: {e}")
             self.stop_event.set()
@@ -189,6 +201,7 @@ class TileDownloader:
                 # 获取任务，设置超时
                 task = self.task_queue.get(timeout=1)
                 if task is None:
+                    self._update_progress()
                     self.task_queue.task_done()
                     continue
                 
@@ -202,6 +215,7 @@ class TileDownloader:
                             f"{thread_name} - zoom {z} 超出 [{self.provider.min_zoom}, {self.provider.max_zoom}]，跳过"
                         )
                         self.skipped_count += 1
+                        self._update_progress()
                         self.task_queue.task_done()
                         continue
 
@@ -210,6 +224,7 @@ class TileDownloader:
                     if file_path.exists():
                         logger.debug(f"{thread_name} - [跳过] 已存在: {file_path}")
                         self.skipped_count += 1
+                        self._update_progress()
                         self.task_queue.task_done()
                         continue
 
@@ -241,14 +256,17 @@ class TileDownloader:
                                     continue
                                 
                                 # 写入文件
+                                total_bytes = 0
                                 with open(file_path, "wb") as f:
                                     for chunk in resp.iter_content(8192):
                                         if chunk:
+                                            total_bytes += len(chunk)
                                             f.write(chunk)
                                 
-                                logger.info(f"{thread_name} - 下载成功: {file_path}")
+                                logger.info(f"{thread_name} - 下载成功: {file_path} ({total_bytes} 字节)")
                                 ok = True
                                 self.downloaded_count += 1
+                                self.total_bytes += total_bytes  # 更新总字节数
                                 break
                             else:
                                 logger.warning(
@@ -283,6 +301,8 @@ class TileDownloader:
                     logger.error(f"{thread_name} - 任务处理错误: z={z}, x={x}, y={y} - {e}")
                     self.failed_count += 1
                 finally:
+                    # 更新进度
+                    self._update_progress()
                     # 确保任务标记为完成
                     self.task_queue.task_done()
                     
@@ -297,6 +317,15 @@ class TileDownloader:
                 time.sleep(0.5)
         
         logger.info(f"{thread_name} 结束")
+    
+    def _update_progress(self):
+        """
+        更新下载进度
+        """
+        if self.progress_callback and self.total_tasks > 0:
+            # 使用已处理的任务数作为下载进度
+            processed = self.downloaded_count + self.failed_count + self.skipped_count
+            self.progress_callback(processed, self.total_tasks, self.total_bytes)
 
     def get_statistics(self) -> Dict[str, int]:
         return {
