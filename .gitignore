@@ -5,9 +5,9 @@ venv/
 
 # Logs
 *.log
+logs/
 
 # Test files and directories
-test_*
 *.pyc
 __pycache__/
 

@@ -35,6 +35,8 @@ class TileProvider:
         self.max_zoom = max_zoom
         self.subdomains = subdomains or []
         self.attribution = attribution
+        # 从URL模板提取扩展名
+        self.extension = self._extract_extension()
 
     def get_tile_url(self, x: int, y: int, zoom: int) -> str:
         raise NotImplementedError
@@ -43,6 +45,26 @@ class TileProvider:
         self, x: int, y: int, zoom: int, base_dir: Union[str, Path]
     ) -> Path:
         raise NotImplementedError
+
+    def _extract_extension(self) -> str:
+        """
+        从URL模板中提取瓦片文件扩展名
+        
+        Returns:
+            str: 提取的扩展名（不带点），默认为jpeg
+        """
+        import re
+        # 查找URL中的文件扩展名模式
+        match = re.search(r'\.([a-zA-Z0-9]+)(?:\?|$)', self.url_template)
+        if match:
+            # 转换为小写
+            ext = match.group(1).lower()
+            # 标准化扩展名：jpg和jpeg视为相同，统一为jpeg
+            if ext == 'jpg':
+                return 'jpeg'
+            return ext
+        # 默认使用jpeg
+        return 'jpeg'
 
 
 class OSMTileProvider(TileProvider):
@@ -69,7 +91,7 @@ class OSMTileProvider(TileProvider):
         self, x: int, y: int, zoom: int, base_dir: Union[str, Path]
     ) -> Path:
         base_dir = Path(base_dir)
-        return base_dir / "osm" / str(zoom) / str(x) / f"{y}.png"
+        return base_dir / "osm" / str(zoom) / str(x) / f"{y}.{self.extension}"
 
 
 class BingTileProvider(TileProvider):
@@ -112,7 +134,7 @@ class BingTileProvider(TileProvider):
         self, x: int, y: int, zoom: int, base_dir: Union[str, Path]
     ) -> Path:
         base_dir = Path(base_dir)
-        return base_dir / "bing" / str(zoom) / str(x) / f"{y}.jpeg"
+        return base_dir / "bing" / str(zoom) / str(x) / f"{y}.{self.extension}"
 
 
 class CustomTileProvider(TileProvider):
@@ -164,7 +186,7 @@ class CustomTileProvider(TileProvider):
         self, x: int, y: int, zoom: int, base_dir: Union[str, Path]
     ) -> Path:
         base_dir = Path(base_dir)
-        return base_dir / str(zoom) / str(x) / f"{y}.jpeg"  # 默认使用jpeg格式，直接保存到输出目录
+        return base_dir / str(zoom) / str(x) / f"{y}.{self.extension}"  # 使用动态提取的扩展名
 
 
 class ProviderManager:
