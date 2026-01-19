@@ -66,12 +66,17 @@ class TileDownloader:
         timeout: int = 10,
         is_tms: bool = False,
         progress_callback: callable = None,
-        enable_resume: bool = True  # 是否启用断点续传
+        enable_resume: bool = True,  # 是否启用断点续传
+        tile_format: str = None  # 瓦片格式
     ):
         try:
             self.provider: TileProvider = ProviderManager.get_provider(provider_name)
             self.provider.is_tms = is_tms
             self.is_tms = is_tms
+            
+            # 设置瓦片格式
+            if tile_format:
+                self.provider.set_tile_format(tile_format)
             
             # 转换输出目录路径，支持Windows路径和Linux路径
             self.output_dir = convert_path(output_dir)

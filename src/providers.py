@@ -27,6 +27,7 @@ class TileProvider:
         max_zoom: int,
         subdomains: List[str],
         attribution: str = "",
+        tile_format: str = None,
     ):
         self.name = name
         self.provider_type = provider_type
@@ -35,8 +36,17 @@ class TileProvider:
         self.max_zoom = max_zoom
         self.subdomains = subdomains or []
         self.attribution = attribution
-        # 从URL模板提取扩展名
-        self.extension = self._extract_extension()
+        # 使用指定的格式或从URL模板提取扩展名
+        self.extension = self._extract_extension(tile_format)
+    
+    def set_tile_format(self, tile_format: str):
+        """
+        设置瓦片格式
+        
+        Args:
+            tile_format: 瓦片格式，如jpeg, jpg, png
+        """
+        self.extension = tile_format.lower()
 
     def get_tile_url(self, x: int, y: int, zoom: int) -> str:
         raise NotImplementedError
@@ -46,13 +56,25 @@ class TileProvider:
     ) -> Path:
         raise NotImplementedError
 
-    def _extract_extension(self) -> str:
+    def _extract_extension(self, tile_format: str = None) -> str:
         """
-        从URL模板中提取瓦片文件扩展名
+        从URL模板中提取瓦片文件扩展名，或使用指定的格式
         
+        Args:
+            tile_format: 瓦片格式，如jpeg, jpg, png
+            
         Returns:
             str: 提取的扩展名（不带点），默认为jpeg
         """
+        # 如果指定了格式，直接使用
+        if tile_format:
+            ext = tile_format.lower()
+            # 标准化扩展名：jpg和jpeg视为相同，统一为jpeg
+            if ext == 'jpg':
+                return 'jpeg'
+            return ext
+            
+        # 否则从URL模板提取
         import re
         # 查找URL中的文件扩展名模式
         match = re.search(r'\.([a-zA-Z0-9]+)(?:\?|$)', self.url_template)

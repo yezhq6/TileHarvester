@@ -196,8 +196,19 @@
                                    min="1" max="32" value="4" required>
                         </div>
                         
+                        <!-- 瓦片格式 -->
+                        <div class="mb-3">
+                            <label for="tileFormat" class="form-label">瓦片格式</label>
+                            <select class="form-select" id="tileFormat" name="tile_format">
+                                <option value="jpg" selected>JPG</option>
+                                <option value="jpeg">JPEG</option>
+                                <option value="png">PNG</option>
+                            </select>
+                            <div class="form-text">
+                                选择下载瓦片的图片格式
+                            </div>
+                        </div>
 
-                        
                         <!-- 下载控制按钮 -->
                     <div class="btn-group w-100" id="downloadControls">
                         <button type="submit" class="btn btn-success" id="downloadBtn">开始下载</button>
