@@ -156,10 +156,22 @@
                         </div>
                         
                         <div class="mb-3">
-                            <label for="outputDir" class="form-label">输出目录名称</label>
-                            <input type="text" class="form-control" id="outputDir" name="output_dir" placeholder="例如：tiles_bing" value="tiles" required>
+                            <label for="outputPath" class="form-label">输出路径</label>
+                            <input type="text" class="form-control" id="outputPath" name="output_path" placeholder="例如：tiles_bing 或 tiles.mbtiles" value="tiles_datasets" required>
                             <div class="form-text">
-                                输入瓦片保存目录
+                                输入瓦片保存目录或MBTiles文件路径(*.mbtiles)
+                            </div>
+                        </div>
+                        
+                        <!-- 保存格式 -->
+                        <div class="mb-3">
+                            <label for="saveFormat" class="form-label">保存格式</label>
+                            <select class="form-select" id="saveFormat" name="save_format">
+                                <option value="directory" selected>目录结构</option>
+                                <option value="mbtiles">MBTiles文件</option>
+                            </select>
+                            <div class="form-text">
+                                选择瓦片保存格式，MBTiles为单个文件格式
                             </div>
                         </div>
                         
@@ -200,9 +212,9 @@
                         <div class="mb-3">
                             <label for="tileFormat" class="form-label">瓦片格式</label>
                             <select class="form-select" id="tileFormat" name="tile_format">
-                                <option value="jpg" selected>JPG</option>
+                                <option value="png" selected>PNG</option>
+                                <option value="jpg">JPG</option>
                                 <option value="jpeg">JPEG</option>
-                                <option value="png">PNG</option>
                             </select>
                             <div class="form-text">
                                 选择下载瓦片的图片格式
@@ -479,6 +491,10 @@
             
             // 处理子域名列表
             data.subdomains = data.subdomains ? data.subdomains.split(',').map(s => s.trim()).filter(s => s) : [];
+            
+            // 重命名参数：output_path 改为 output_dir
+            data.output_dir = data.output_path;
+            delete data.output_path;
             
             // 显示加载状态
             const downloadBtn = document.getElementById('downloadBtn');

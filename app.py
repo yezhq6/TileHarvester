@@ -84,7 +84,8 @@ def api_download():
             threads = int(data.get('threads', 4))
             is_tms = bool(data.get('tms', False))
             subdomains = data.get('subdomains', [])
-            tile_format = data.get('tile_format', 'jpg')
+            tile_format = data.get('tile_format', 'png')
+            save_format = data.get('save_format', 'directory')
         except ValueError as e:
             return jsonify({'error': f'Invalid parameter format: {e}'}), 400
         
@@ -139,7 +140,8 @@ def api_download():
                     max_threads=threads,
                     is_tms=is_tms,
                     progress_callback=progress_callback,
-                    tile_format=tile_format
+                    tile_format=tile_format,
+                    save_format=save_format
                 )
                 
                 # 添加下载任务

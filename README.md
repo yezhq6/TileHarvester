@@ -11,12 +11,16 @@
 - 🎯 **精确边界控制**：支持手动输入边界坐标
 - 🔧 **灵活配置**：支持自定义输出目录、缩放级别等
 - 💡 **友好的Web界面**：基于Flask和Leaflet的交互式地图界面
+- 📷 **支持多种图片格式**：支持jpg、jpeg、png格式下载
+- 📦 **支持MBTiles格式**：可将瓦片下载为MBTiles文件，便于存储和传输
+- 🔄 **格式转换工具**：提供瓦片格式转换功能，支持不同格式间的相互转换
+- 🔀 **MBTiles工具集**：支持MBTiles和PNG目录结构的相互转换、合并和拆分
 
 ## 技术栈
 
 - **后端**：Python 3, Flask
 - **前端**：HTML, CSS, JavaScript, Leaflet.js, Bootstrap
-- **核心库**：requests, threading, queue
+- **核心库**：requests, threading, queue, sqlite3, Pillow, mercantile
 
 ## 安装步骤
 
@@ -87,6 +91,14 @@ TileHarvester/
 │   └── cli.py            # 命令行接口（预留）
 ├── templates/
 │   └── index.html        # Web界面模板
+├── format_converter/     # 瓦片格式转换工具
+│   ├── image_converter.py    # 图片格式转换脚本
+│   ├── tile_merger.py        # 瓦片合并工具
+│   └── README.md             # 格式转换工具说明
+├── mbtiles_tools/        # MBTiles工具集
+│   ├── mbtiles_converter.py  # MBTiles转换脚本
+│   └── README.md             # MBTiles工具说明
+├── log/                  # 日志文件目录
 └── README.md            # 项目说明文档
 ```
 

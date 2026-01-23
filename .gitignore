@@ -6,15 +6,20 @@ venv/
 # Logs
 *.log
 logs/
+log/
 
 # Test files and directories
 *.pyc
 __pycache__/
 
 # Tile directories
-tiles/
+tiles_datasets/
 test_stability/
 test_stability_fast/
+format_converter/tiles1/
+format_converter/tiles2/
+mbtiles_tools/test/
+mbtiles_tools/test2/
 
 # OS files
 .DS_Store
