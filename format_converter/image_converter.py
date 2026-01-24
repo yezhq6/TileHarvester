@@ -29,11 +29,14 @@ def convert_image(input_path, output_path, output_format):
         with Image.open(input_path) as img:
             # 如果转换为jpg或jpeg，需要确保是RGB模式
             if output_format.lower() in ['jpg', 'jpeg']:
-                if img.mode in ['RGBA', 'LA']:
+                if img.mode in ['RGBA', 'LA', 'P']:
                     img = img.convert('RGB')
             
-            # 保存图片
-            img.save(output_path, format=output_format.upper())
+            # 保存图片，处理格式名称映射
+            if output_format.lower() in ['jpg', 'jpeg']:
+                img.save(output_path, format='JPEG')
+            else:
+                img.save(output_path, format=output_format.upper())
             print(f"✓ 转换成功: {input_path} -> {output_path}")
             return True
     except Exception as e:
