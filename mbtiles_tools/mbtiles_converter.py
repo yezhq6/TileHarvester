@@ -976,3 +976,55 @@ class MBTilesConverter:
         lat = math.degrees(math.atan(math.sinh(n)))
         
         return lat, lon
+
+
+def png_to_mbtiles(input_dir, mbtiles_path, max_workers=None, zoom_levels=None):
+    """
+    将PNG目录结构转换为MBTiles
+    
+    Args:
+        input_dir: 输入目录
+        mbtiles_path: 输出MBTiles文件路径
+        max_workers: 最大线程数
+        zoom_levels: 要转换的缩放级别列表，None表示转换所有级别
+    """
+    # 验证输入目录是否存在
+    if not os.path.exists(input_dir):
+        print(f"✗ 输入目录不存在: {input_dir}")
+        return False
+    
+    # 创建输出目录
+    Path(os.path.dirname(mbtiles_path)).mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # 仅获取 0-23 的数字目录作为缩放级别目录
+        zoom_dirs = [d for d in os.listdir(input_dir) 
+                     if os.path.isdir(os.path.join(input_dir, d)) and d.isdigit() and 0 <= int(d) <= 23]
+        
+        # 转换为整数并排序
+        all_zoom_levels = sorted([int(d) for d in zoom_dirs])
+        
+        # 过滤要转换的缩放级别
+        if zoom_levels:
+            convert_zoom_levels = [z for z in all_zoom_levels if z in zoom_levels]
+        else:
+            convert_zoom_levels = all_zoom_levels
+        
+        if not convert_zoom_levels:
+            print("✗ 没有要转换的缩放级别")
+            return False
+        
+        # 创建MBTilesConverter实例
+        converter = MBTilesConverter()
+        
+        # 使用现有的convert_directory_to_mbtiles方法
+        return converter.convert_directory_to_mbtiles(
+            input_dir=input_dir,
+            mbtiles_path=mbtiles_path,
+            scheme='xyz',  # PNG目录通常使用xyz坐标系统
+            max_workers=max_workers,
+            zoom_levels=zoom_levels
+        )
+    except Exception as e:
+        print(f"✗ PNG到MBTiles转换失败: {e}")
+        return False
