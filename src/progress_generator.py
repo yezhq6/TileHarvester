@@ -24,6 +24,9 @@ def convert_path(output_dir: str) -> Path:
     Returns:
         Path: 转换后的Path对象
     """
+    # 处理命令行中可能的空格和换行问题
+    output_dir = output_dir.strip()
+    
     # 1. 检查是否为WSL2路径（以/mnt/开头）
     if output_dir.startswith('/mnt/'):
         return Path(output_dir)
@@ -37,98 +40,21 @@ def convert_path(output_dir: str) -> Path:
         wsl_path = output_dir[2:].replace('\\', '/')
         # 构建完整的WSL路径
         full_path = f"/mnt/{drive_letter}/{wsl_path.lstrip('/')}"
+        print(f"  转换Windows路径到WSL2路径: {output_dir} -> {full_path}")
         return Path(full_path)
     
-    # 3. 检查是否为变形后的Windows路径（如D:codesMapTilesDownloader）
-    elif len(output_dir) > 1 and output_dir[1] == ':' and len(output_dir) > 2:
-        # 路径可能是命令行中反斜杠被解释为转义字符的情况
-        drive_letter = output_dir[0].lower()
-        
-        # 构建可能的路径列表
-        possible_paths = []
-        
-        # 常见的基础路径
-        base_paths = [
-            f"/mnt/{drive_letter}",
-            f"/mnt/{drive_letter}/codes",
-            f"/mnt/{drive_letter}/codes/MapTilesDownloader",
-            f"/mnt/{drive_letter}/codes/MapTilesDownloader/TileHarvester",
-            f"/mnt/{drive_letter}/codes/MapTilesDownloader/TileHarvester/tiles_datasets",
-            f"/mnt/{drive_letter}/MapTilesDownloader",
-            f"/mnt/{drive_letter}/MapTilesDownloader/TileHarvester",
-            f"/mnt/{drive_letter}/MapTilesDownloader/TileHarvester/tiles_datasets",
-            f"/mnt/{drive_letter}/TileHarvester",
-            f"/mnt/{drive_letter}/TileHarvester/tiles_datasets",
-            f"/mnt/{drive_letter}/tiles_datasets"
-        ]
-        
-        # 检查base_paths中存在的路径
-        existing_base_paths = []
-        for base_path in base_paths:
-            if Path(base_path).exists():
-                existing_base_paths.append(base_path)
-        
-        # 如果有存在的基础路径，构建可能的完整路径
-        if existing_base_paths:
-            # 提取可能的文件名或目录名
-            path_part = output_dir[2:]
-            
-            # 检查是否可能是文件路径
-            if '.mbtiles' in path_part.lower():
-                # 查找tiles_datasets目录中的mbtiles文件
-                for base_path in existing_base_paths:
-                    if 'tiles_datasets' in base_path:
-                        tiles_datasets_path = Path(base_path)
-                        mbtiles_files = list(tiles_datasets_path.glob('*.mbtiles'))
-                        for mbtiles_file in mbtiles_files:
-                            # 检查文件名是否在变形的路径中
-                            if mbtiles_file.stem.lower() in path_part.lower():
-                                full_path = str(mbtiles_file)
-                                return Path(full_path)
-            
-            # 检查是否可能是目录路径
-            # 尝试匹配常见的目录名
-            common_dirs = ['codes', 'MapTilesDownloader', 'TileHarvester', 'tiles_datasets']
-            
-            for base_path in existing_base_paths:
-                # 从基础路径开始，尝试添加常见目录名
-                current_path = base_path
-                for dir_name in common_dirs:
-                    # 如果当前路径不包含该目录，尝试添加
-                    if dir_name not in current_path and dir_name.lower() in path_part.lower():
-                        new_path = os.path.join(current_path, dir_name)
-                        if Path(new_path).exists():
-                            current_path = new_path
-                            # 检查是否匹配
-                            if 'xyz' in path_part.lower() and 'xyz' in new_path.lower():
-                                return Path(new_path)
-                
-                # 检查当前路径是否匹配
-                if Path(current_path).exists():
-                    # 检查是否需要添加子目录
-                    # 尝试从path_part中提取可能的子目录名
-                    # 特别是检查xyz这样的目录名
-                    if 'xyz' in path_part.lower():
-                        xyz_path = os.path.join(current_path, 'xyz')
-                        if Path(xyz_path).exists():
-                            return Path(xyz_path)
-                    
-                    return Path(current_path)
-        
-        # 如果没有找到匹配的路径，使用最可能的路径
-        most_likely_path = f"/mnt/{drive_letter}/codes/MapTilesDownloader/TileHarvester/tiles_datasets"
-        if Path(most_likely_path).exists():
-            return Path(most_likely_path)
-        else:
-            # 尝试其他可能的路径
-            other_paths = [
-                f"/mnt/{drive_letter}/MapTilesDownloader/TileHarvester/tiles_datasets",
-                f"/mnt/{drive_letter}/TileHarvester/tiles_datasets",
-                f"/mnt/{drive_letter}/tiles_datasets"
-            ]
-            for path in other_paths:
-                if Path(path).exists():
-                    return Path(path)
+    # 3. 特殊情况处理：路径被分割的情况
+    # 例如："E:\qqg\mbtiles \\taiwan.mbtiles"（中间有空格）
+    elif len(output_dir) > 1 and output_dir[1] == ':':
+        # 处理可能的路径分割问题
+        # 尝试修复路径，去除中间的空格
+        fixed_path = output_dir.replace(' ', '')
+        # 替换反斜杠为正斜杠
+        fixed_path = fixed_path.replace('\\', '/')
+        drive_letter = fixed_path[0].lower()
+        full_path = f"/mnt/{drive_letter}/{fixed_path[2:].lstrip('/')}"
+        print(f"  修复并转换Windows路径到WSL2路径: {output_dir} -> {full_path}")
+        return Path(full_path)
     
     # 4. 其他情况，直接返回
     return Path(output_dir)
