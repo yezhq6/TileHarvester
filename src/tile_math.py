@@ -31,6 +31,10 @@ class TileMath:
             1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi
         ) / 2.0 * n
         
+        # 不再在这里翻转 y，因为在 CustomTileProvider.get_tile_path 方法中已经处理了 y 坐标的顺序
+        # if is_tms:
+        #     y_tile = (n - 1) - y_tile
+        
         # 根据需要选择取整方式
         if use_ceil:
             # 向上取整，使用1e-10避免浮点精度问题
@@ -41,22 +45,14 @@ class TileMath:
             x_tile = int(x_tile)
             y_tile = int(y_tile)
         
-        # 如果要 TMS，就在最后翻转 y
-        if is_tms:
-            y_tile = (n - 1) - y_tile
-        
         return int(x_tile), int(y_tile)
 
     @staticmethod
     def tile_to_latlon(x: int, y: int, zoom: int, is_tms: bool = False):
-        n = 2 ** zoom
         """
         瓦片坐标 -> 瓦片左上角经纬度 (lat, lon)
         """
         n = 2 ** zoom
-        lon = x / n * 360.0 - 180.0
-        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
-        lat = math.degrees(lat_rad)
         
         # 如果输入是 TMS 坐标，先翻回 Slippy Map
         if is_tms:
@@ -89,22 +85,23 @@ class TileMath:
         max_valid_tile = n - 1
 
         # 1. 计算边界瓦片坐标
+        # 统一使用Slippy Map的逻辑计算瓦片范围
         # 左上角使用向下取整：将经纬度转换为最接近的瓦片坐标
         min_x, min_y = TileMath.latlon_to_tile(north, west, zoom, is_tms, use_ceil=False)
         # 右下角使用向上取整：确保包含边界
         max_x, max_y = TileMath.latlon_to_tile(south, east, zoom, is_tms, use_ceil=True)
 
-        # 2. 确保瓦片坐标在有效范围内 [0, max_valid_tile]
-        min_x = max(0, min_x)
-        min_y = max(0, min_y)
-        max_x = min(max_valid_tile, max_x)
-        max_y = min(max_valid_tile, max_y)
-
-        # 纠正一下顺序，保证 min <= max
+        # 先纠正一下顺序，保证 min <= max
         if min_x > max_x:
             min_x, max_x = max_x, min_x
         if min_y > max_y:
             min_y, max_y = max_y, min_y
+
+        # 然后确保瓦片坐标在有效范围内 [0, max_valid_tile]
+        min_x = max(0, min_x)
+        min_y = max(0, min_y)
+        max_x = min(max_valid_tile, max_x)
+        max_y = min(max_valid_tile, max_y)
 
         tiles = []
 

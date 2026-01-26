@@ -18,13 +18,13 @@ import sys
 from typing import Generator, Tuple
 
 # 确保日志目录存在
-log_dir = 'log'
+log_dir = 'logs'
 os.makedirs(log_dir, exist_ok=True)
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(os.path.join(log_dir, 'tile_merger.log'), encoding='utf-8'),
         logging.StreamHandler(sys.stdout)

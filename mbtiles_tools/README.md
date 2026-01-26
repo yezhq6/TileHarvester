@@ -1,16 +1,20 @@
 # MBTiles转换工具
 
-一个功能强大的MBTiles转换工具，支持MBTiles和PNG目录结构的相互转换，以及MBTiles的合并和拆分功能。
+一个功能强大的MBTiles转换工具，支持MBTiles和目录结构的相互转换，以及MBTiles的合并和拆分功能。
 
 ## 功能特点
 
-1. **MBTiles转PNG**：将MBTiles文件转换为标准的PNG目录结构
-2. **PNG转MBTiles**：将PNG目录结构转换为MBTiles文件
+1. **MBTiles转目录**：将MBTiles文件转换为标准的目录结构
+2. **目录转MBTiles**：将目录结构转换为MBTiles文件
 3. **MBTiles合并**：合并多个MBTiles文件为一个
 4. **MBTiles拆分**：按缩放级别拆分MBTiles文件
-5. **多线程支持**：支持并行处理，提高转换效率
-6. **选择性转换**：可以选择特定的缩放级别进行转换
-7. **详细的转换统计**：显示转换进度、成功/失败数量、耗时等信息
+5. **MBTiles比较**：比较两个MBTiles文件是否相同
+6. **MBTiles分析**：分析MBTiles文件的元数据、瓦片数据、层级分布和经纬度范围
+7. **多线程支持**：支持并行处理，提高转换效率
+8. **选择性转换**：可以选择特定的缩放级别进行转换
+9. **详细的转换统计**：显示转换进度、成功/失败数量、耗时等信息
+10. **坐标系统支持**：正确处理XYZ和TMS坐标系统之间的转换
+11. **多格式支持**：支持jpg、png、jpeg格式的瓦片
 
 ## 安装依赖
 
@@ -25,31 +29,38 @@ pip install -r ../requirements.txt
 ### 命令格式
 
 ```bash
-python mbtiles_converter.py <command> [options]
+# 设置PYTHONPATH
+export PYTHONPATH=$(pwd)
+
+# 运行命令
+python mbtiles_tools/cli.py <command> [options]
 ```
 
 ### 命令列表
 
 | 命令 | 描述 |
 |------|------|
-| `mbtiles_to_png` | 将MBTiles转换为PNG目录结构 |
-| `png_to_mbtiles` | 将PNG目录结构转换为MBTiles |
+| `mbtiles_to_dir` | 将MBTiles转换为目录结构 |
+| `dir_to_mbtiles` | 将目录结构转换为MBTiles |
 | `merge` | 合并多个MBTiles文件 |
 | `split` | 按缩放级别拆分MBTiles文件 |
+| `compare` | 比较两个MBTiles文件是否相同 |
+| `analyze` | 分析MBTiles文件的元数据、瓦片数据、层级分布和经纬度范围 |
 
 ## 详细命令说明
 
-### 1. MBTiles转PNG
+### 1. MBTiles转目录
 
-将MBTiles文件转换为标准的PNG目录结构，目录结构为：`zoom/x/y.png`
+将MBTiles文件转换为标准的目录结构，目录结构为：`zoom/x/y.ext`
 
 ```bash
-python mbtiles_converter.py mbtiles_to_png -i <mbtiles_path> -o <output_dir> [-w <workers>] [-z <zoom_levels>]
+python mbtiles_tools/cli.py mbtiles_to_dir -i <mbtiles_path> -o <output_dir> [-s <scheme>] [-w <workers>] [-z <zoom_levels>]
 ```
 
 **参数说明**：
 - `-i, --input`: MBTiles文件路径（必填）
 - `-o, --output`: 输出目录（必填）
+- `-s, --scheme`: 输出目录的坐标系统 (xyz/tms)，默认询问用户
 - `-w, --workers`: 最大线程数，默认使用CPU核心数
 - `-z, --zoom`: 要提取的缩放级别列表，如 `-z 14 15`，默认提取所有级别
 
@@ -57,34 +68,38 @@ python mbtiles_converter.py mbtiles_to_png -i <mbtiles_path> -o <output_dir> [-w
 
 ```bash
 # 转换所有缩放级别，使用默认线程数
-python mbtiles_converter.py mbtiles_to_png -i tiles.mbtiles -o tiles_png
+python mbtiles_tools/cli.py mbtiles_to_dir -i tiles.mbtiles -o tiles_dir
 
-# 只转换缩放级别14和15，使用8个线程
-python mbtiles_converter.py mbtiles_to_png -i tiles.mbtiles -o tiles_png -z 14 15 -w 8
+# 只转换缩放级别14和15，使用8个线程，输出XYZ格式
+python mbtiles_tools/cli.py mbtiles_to_dir -i tiles.mbtiles -o tiles_dir -z 14 15 -w 8 -s xyz
 ```
 
-### 2. PNG转MBTiles
+### 2. 目录转MBTiles
 
-将PNG目录结构转换为MBTiles文件
+将目录结构转换为MBTiles文件
 
 ```bash
-python mbtiles_converter.py png_to_mbtiles -i <input_dir> -o <mbtiles_path> [-w <workers>] [-z <zoom_levels>]
+python mbtiles_tools/cli.py dir_to_mbtiles -i <input_dir> -o <mbtiles_path> [-s <scheme>] [-w <workers>] [-z <zoom_levels>]
 ```
 
 **参数说明**：
-- `-i, --input`: 输入目录，包含PNG瓦片（必填）
+- `-i, --input`: 输入目录，包含瓦片（必填）
 - `-o, --output`: 输出MBTiles文件路径（必填）
+- `-s, --scheme`: 输入目录的坐标系统 (xyz/tms)，默认 tms (进行坐标转换)
 - `-w, --workers`: 最大线程数，默认使用CPU核心数
 - `-z, --zoom`: 要转换的缩放级别列表，如 `-z 14 15`，默认转换所有级别
 
 **示例**：
 
 ```bash
-# 转换所有缩放级别，使用默认线程数
-python mbtiles_converter.py png_to_mbtiles -i tiles_png -o output.mbtiles
+# 转换所有缩放级别，使用默认线程数（默认进行坐标转换）
+python mbtiles_tools/cli.py dir_to_mbtiles -i tiles_dir -o output.mbtiles
 
-# 只转换缩放级别14和15，使用8个线程
-python mbtiles_converter.py png_to_mbtiles -i tiles_png -o output.mbtiles -z 14 15 -w 8
+# 不进行坐标转换，直接使用XYZ格式
+python mbtiles_tools/cli.py dir_to_mbtiles -i tiles_dir -o output.mbtiles -s xyz
+
+# 只转换缩放级别14和15，使用8个线程，进行坐标转换
+python mbtiles_tools/cli.py dir_to_mbtiles -i tiles_dir -o output.mbtiles -z 14 15 -w 8 -s tms
 ```
 
 ### 3. MBTiles合并
@@ -92,7 +107,7 @@ python mbtiles_converter.py png_to_mbtiles -i tiles_png -o output.mbtiles -z 14 
 合并多个MBTiles文件为一个MBTiles文件
 
 ```bash
-python mbtiles_converter.py merge -i <input_files> -o <output_file> [-w <workers>]
+python mbtiles_tools/cli.py merge -i <input_files> -o <output_file> [-w <workers>]
 ```
 
 **参数说明**：
@@ -104,10 +119,10 @@ python mbtiles_converter.py merge -i <input_files> -o <output_file> [-w <workers
 
 ```bash
 # 合并两个MBTiles文件
-python mbtiles_converter.py merge -i tiles1.mbtiles tiles2.mbtiles -o merged.mbtiles
+python mbtiles_tools/cli.py merge -i tiles1.mbtiles tiles2.mbtiles -o merged.mbtiles
 
 # 合并多个MBTiles文件，使用4个线程
-python mbtiles_converter.py merge -i tiles1.mbtiles tiles2.mbtiles tiles3.mbtiles -o merged.mbtiles -w 4
+python mbtiles_tools/cli.py merge -i tiles1.mbtiles tiles2.mbtiles tiles3.mbtiles -o merged.mbtiles -w 4
 ```
 
 ### 4. MBTiles拆分
@@ -115,7 +130,7 @@ python mbtiles_converter.py merge -i tiles1.mbtiles tiles2.mbtiles tiles3.mbtile
 按缩放级别拆分MBTiles文件，每个缩放级别生成一个独立的MBTiles文件
 
 ```bash
-python mbtiles_converter.py split -i <mbtiles_path> -o <output_dir> -z <zoom_levels> [-w <workers>]
+python mbtiles_tools/cli.py split -i <mbtiles_path> -o <output_dir> -z <zoom_levels> [-w <workers>]
 ```
 
 **参数说明**：
@@ -128,10 +143,47 @@ python mbtiles_converter.py split -i <mbtiles_path> -o <output_dir> -z <zoom_lev
 
 ```bash
 # 拆分缩放级别14和15
-python mbtiles_converter.py split -i tiles.mbtiles -o split_output -z 14 15
+python mbtiles_tools/cli.py split -i tiles.mbtiles -o split_output -z 14 15
 
 # 拆分缩放级别10到15，使用8个线程
-python mbtiles_converter.py split -i tiles.mbtiles -o split_output -z 10 11 12 13 14 15 -w 8
+python mbtiles_tools/cli.py split -i tiles.mbtiles -o split_output -z 10 11 12 13 14 15 -w 8
+```
+
+### 5. MBTiles比较
+
+比较两个MBTiles文件是否相同，包括元数据和瓦片数据
+
+```bash
+python mbtiles_tools/cli.py compare -f1 <file1> -f2 <file2>
+```
+
+**参数说明**：
+- `-f1, --file1`: 第一个MBTiles文件路径（必填）
+- `-f2, --file2`: 第二个MBTiles文件路径（必填）
+
+**示例**：
+
+```bash
+# 比较两个MBTiles文件
+python mbtiles_tools/cli.py compare -f1 tiles1.mbtiles -f2 tiles2.mbtiles
+```
+
+### 6. MBTiles分析
+
+分析MBTiles文件的元数据、瓦片数据、层级分布和经纬度范围
+
+```bash
+python mbtiles_tools/cli.py analyze -i <mbtiles_path>
+```
+
+**参数说明**：
+- `-i, --input`: 输入MBTiles文件路径（必填）
+
+**示例**：
+
+```bash
+# 分析MBTiles文件
+python mbtiles_tools/cli.py analyze -i tiles.mbtiles
 ```
 
 ## 转换说明
@@ -140,29 +192,46 @@ python mbtiles_converter.py split -i tiles.mbtiles -o split_output -z 10 11 12 1
 
 MBTiles是一种基于SQLite的瓦片存储格式，包含以下表：
 - `tiles`: 存储瓦片数据，包含`zoom_level`、`tile_column`、`tile_row`和`tile_data`字段
-- `metadata`: 存储元数据，如名称、类型、格式等
+- `metadata`: 存储元数据，如名称、类型、格式、坐标系等
 
-### 坐标系转换
+### 坐标系统转换
 
-MBTiles中的`tile_row`是从顶部开始计数的，而标准的XYZ瓦片格式是从底部开始计数的。本工具会自动处理这种转换，确保输出的PNG目录结构符合标准XYZ格式。
+#### 坐标系统说明
+- **XYZ (Slippy Map)**：Y=0 在顶部（北），向下增加
+- **TMS**：Y=0 在底部（南），向上增加
+- **MBTiles内部**：默认使用TMS坐标系统
+
+#### 转换公式
+- **TMS to XYZ**: `y_xyz = (2^zoom - 1) - y_tms`
+- **XYZ to TMS**: `y_tms = (2^zoom - 1) - y_xyz`
+
+#### 转换逻辑
+- **目录转MBTiles**：
+  - 如果scheme='xyz'：直接转换，不进行坐标转换，scheme字段设为'xyz'
+  - 如果scheme='tms'：进行坐标转换 (XYZ to TMS)，scheme字段设为'tms'
+  - 默认scheme='tms'：进行坐标转换 (XYZ to TMS)，scheme字段设为'tms'
+
+- **MBTiles转目录**：
+  - 读取MBTiles文件的scheme字段
+  - 根据用户选择的输出坐标系统进行转换
 
 ### 性能优化
 
 1. **多线程处理**：使用线程池并行处理瓦片转换，提高转换速度
-2. **批量事务**：PNG转MBTiles时，每100个瓦片提交一次事务，减少数据库操作开销
+2. **批量事务**：目录转MBTiles时，每100个瓦片提交一次事务，减少数据库操作开销
 3. **进度显示**：显示转换进度和详细统计信息，方便监控转换状态
 
 ## 示例应用场景
 
-1. **将下载的MBTiles转换为PNG**：用于需要标准PNG目录结构的应用
-2. **将PNG瓦片打包为MBTiles**：方便存储和传输大量瓦片
+1. **将下载的MBTiles转换为目录**：用于需要标准目录结构的应用
+2. **将目录瓦片打包为MBTiles**：方便存储和传输大量瓦片
 3. **合并多个MBTiles文件**：将不同区域或缩放级别的MBTiles合并为一个
 4. **按缩放级别拆分MBTiles**：生成特定缩放级别的MBTiles，减小文件大小
 
 ## 注意事项
 
 1. 转换过程中会创建必要的目录结构
-2. 支持的图片格式：PNG（主要）
+2. 支持的图片格式：jpg、png、jpeg
 3. 转换时会覆盖已存在的文件
 4. 建议根据系统配置选择合适的线程数
 5. 对于大规模转换，建议使用SSD存储以提高性能
@@ -171,8 +240,6 @@ MBTiles中的`tile_row`是从顶部开始计数的，而标准的XYZ瓦片格式
 
 - Python 3.7+
 - SQLite 3+
-- Pillow 10.0.0+
-- mercantile 1.2.1+
 
 ## 许可证
 

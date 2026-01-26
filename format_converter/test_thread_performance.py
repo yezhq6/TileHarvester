@@ -14,7 +14,7 @@ from pathlib import Path
 def windows_to_wsl_path(windows_path):
     """
     将Windows路径转换为WSL2路径
-    例如: D:\codes\test -> /mnt/d/codes/test
+    例如: D:/codes/test -> /mnt/d/codes/test
     """
     if windows_path.startswith('\\'):
         # 网络共享路径，暂不处理

@@ -14,7 +14,7 @@
 - 📷 **支持多种图片格式**：支持jpg、jpeg、png格式下载
 - 📦 **支持MBTiles格式**：可将瓦片下载为MBTiles文件，便于存储和传输
 - 🔄 **格式转换工具**：提供瓦片格式转换功能，支持不同格式间的相互转换
-- 🔀 **MBTiles工具集**：支持MBTiles和PNG目录结构的相互转换、合并和拆分
+- 🔀 **MBTiles工具集**：支持MBTiles和PNG目录结构的相互转换、合并、拆分、比较和分析
 
 ## 技术栈
 
@@ -88,7 +88,8 @@ TileHarvester/
 │   ├── downloader.py     # 核心下载逻辑
 │   ├── providers.py      # 瓦片提供商管理
 │   ├── tile_math.py      # 瓦片坐标计算
-│   └── cli.py            # 命令行接口（预留）
+│   ├── cli.py            # 命令行接口（预留）
+│   └── progress_generator.py  # 进度文件生成器
 ├── templates/
 │   └── index.html        # Web界面模板
 ├── format_converter/     # 瓦片格式转换工具
@@ -96,9 +97,13 @@ TileHarvester/
 │   ├── tile_merger.py        # 瓦片合并工具
 │   └── README.md             # 格式转换工具说明
 ├── mbtiles_tools/        # MBTiles工具集
-│   ├── mbtiles_converter.py  # MBTiles转换脚本
+│   ├── __init__.py           # 包初始化文件
+│   ├── cli.py                # 命令行接口
+│   ├── mbtiles_converter.py  # MBTiles转换核心
+│   ├── coordinate_converter.py  # 坐标转换工具
+│   ├── utils.py              # 工具函数
 │   └── README.md             # MBTiles工具说明
-├── log/                  # 日志文件目录
+├── logs/                 # 日志文件目录
 └── README.md            # 项目说明文档
 ```
 
@@ -120,6 +125,69 @@ TileHarvester/
 - `MAX_THREADS`：最大下载线程数（默认32）
 - `UPLOAD_FOLDER`：默认瓦片存储目录（默认"tiles"）
 - `MAX_CONTENT_LENGTH`：最大请求内容长度（默认16MB）
+
+## 工具使用
+
+### 1. 进度文件生成器 (progress_generator.py)
+
+进度文件生成器用于生成 `.custom_progress.json` 文件，以便在将 MBTiles 转换为目录结构后，或者在复制 MBTiles 文件到其他地方时，能够继续使用断点续传功能。
+
+#### 使用方法
+
+```bash
+# 生成目录的进度文件
+python src/progress_generator.py -p /path/to/tile/directory
+
+# 生成 MBTiles 文件的进度文件
+python src/progress_generator.py -p /path/to/file.mbtiles
+
+# 自定义提供商名称
+python src/progress_generator.py -p /path/to/tile/directory -n my_provider
+```
+
+#### 参数说明
+
+- `-p, --path`：输入路径，可以是目录或 MBTiles 文件
+- `-n, --name`：提供商名称，默认为 'custom'
+
+### 2. MBTiles工具集 (mbtiles_tools)
+
+MBTiles工具集提供了一系列功能强大的MBTiles处理工具，支持MBTiles和目录结构的相互转换、合并、拆分、比较和分析。
+
+#### 功能列表
+
+- **mbtiles_to_dir**：将MBTiles文件转换为标准目录结构
+- **dir_to_mbtiles**：将目录结构转换为MBTiles文件
+- **merge**：合并多个MBTiles文件为一个
+- **split**：按缩放级别拆分MBTiles文件
+- **compare**：比较两个MBTiles文件是否相同
+- **analyze**：分析MBTiles文件的元数据和瓦片分布
+
+#### 使用示例
+
+```bash
+# MBTiles转目录
+python mbtiles_tools/cli.py mbtiles_to_dir -i input.mbtiles -o output_dir
+
+# 目录转MBTiles
+python mbtiles_tools/cli.py dir_to_mbtiles -i input_dir -o output.mbtiles
+
+# 合并MBTiles文件
+python mbtiles_tools/cli.py merge -i file1.mbtiles file2.mbtiles -o merged.mbtiles
+
+# 拆分MBTiles文件
+python mbtiles_tools/cli.py split -i input.mbtiles -o output_dir -z 14 15
+
+# 比较MBTiles文件
+python mbtiles_tools/cli.py compare -f1 file1.mbtiles -f2 file2.mbtiles
+
+# 分析MBTiles文件
+python mbtiles_tools/cli.py analyze -i input.mbtiles
+```
+
+#### 详细说明
+
+有关MBTiles工具集的详细使用说明，请参考 `mbtiles_tools/README.md` 文件。
 
 ## 最佳实践
 
@@ -152,6 +220,16 @@ MIT License
 欢迎提交Issue和Pull Request！
 
 ## 更新日志
+
+### v1.1.0 (2026-01-26)
+- 新增 `progress_generator.py` 工具：用于生成进度文件，支持断点续传
+- 增强 `mbtiles_tools` 工具集：
+  - 新增 `compare` 命令：比较两个MBTiles文件是否相同
+  - 新增 `analyze` 命令：分析MBTiles文件的元数据、瓦片数据和分布
+  - 重构目录结构，添加坐标转换工具和工具函数
+- 统一日志目录：将所有日志文件存储到 `logs` 目录
+- 优化Windows路径处理：改进命令行参数中的Windows路径解析
+- 精简工具输出：优化进度生成器的输出格式，提高可读性
 
 ### v1.0.0 (2026-01-17)
 - 初始版本发布

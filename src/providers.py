@@ -38,6 +38,8 @@ class TileProvider:
         self.attribution = attribution
         # 使用指定的格式或从URL模板提取扩展名
         self.extension = self._extract_extension(tile_format)
+        # TMS坐标系标志
+        self.is_tms = False
     
     def set_tile_format(self, tile_format: str):
         """
@@ -195,6 +197,7 @@ class CustomTileProvider(TileProvider):
         # 替换基本占位符
         url = url.replace("{z}", str(zoom))
         url = url.replace("{x}", str(x))
+        
         url = url.replace("{y}", str(y))
         
         # 处理子域名
@@ -208,6 +211,10 @@ class CustomTileProvider(TileProvider):
         self, x: int, y: int, zoom: int, base_dir: Union[str, Path]
     ) -> Path:
         base_dir = Path(base_dir)
+        # 如果是TMS坐标系，调整y坐标的顺序，使其与QGIS的TMS下载结果一致
+        if self.is_tms:
+            n = 2 ** zoom
+            y = (n - 1) - y
         return base_dir / str(zoom) / str(x) / f"{y}.{self.extension}"  # 使用动态提取的扩展名
 
 

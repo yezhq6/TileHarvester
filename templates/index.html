@@ -212,8 +212,8 @@
                         <div class="mb-3">
                             <label for="tileFormat" class="form-label">瓦片格式</label>
                             <select class="form-select" id="tileFormat" name="tile_format">
-                                <option value="png" selected>PNG</option>
-                                <option value="jpg">JPG</option>
+                                <option value="jpg" selected>JPG</option>
+                                <option value="png">PNG</option>
                                 <option value="jpeg">JPEG</option>
                             </select>
                             <div class="form-text">
@@ -482,6 +482,9 @@
             // 获取表单数据
             const formData = new FormData(this);
             const data = Object.fromEntries(formData);
+            
+            // 添加TMS选项
+            data.tms = document.getElementById('tms').checked;
             
             // 添加边界框数据
             data.north = currentBbox.north;

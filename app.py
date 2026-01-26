@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # 配置
-app.config['UPLOAD_FOLDER'] = 'tiles'
+app.config['UPLOAD_FOLDER'] = 'tiles_datasets'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['MAX_THREADS'] = 32  # 限制最大线程数
 
@@ -131,6 +131,11 @@ def api_download():
                 """下载进度回调"""
                 update_progress(downloaded, total, total_bytes)
             
+            # 确定scheme参数
+            # 默认按照xyz格式下载，scheme指定为xyz
+            # 如果前端勾选了tms，那就按照tms格式下载，scheme指定tms
+            scheme = 'tms' if is_tms else 'xyz'
+            
             # 直接使用TileDownloader而不是BatchDownloader，以便保存实例
             global current_downloader
             with current_downloader_lock:
@@ -141,7 +146,8 @@ def api_download():
                     is_tms=is_tms,
                     progress_callback=progress_callback,
                     tile_format=tile_format,
-                    save_format=save_format
+                    save_format=save_format,
+                    scheme=scheme
                 )
                 
                 # 添加下载任务
