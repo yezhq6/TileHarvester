@@ -8,7 +8,7 @@
 
 import argparse
 from mbtiles_converter import MBTilesConverter
-from utils import parse_zoom_levels
+from utils import parse_zoom_levels, convert_path
 
 
 def main():
@@ -68,17 +68,34 @@ def main():
     
     # 执行相应命令
     if args.command == 'mbtiles_to_dir':
-        converter.convert_mbtiles_to_directory(args.input, args.output, args.scheme, args.workers, zoom_levels)
+        # 转换路径
+        input_path = convert_path(args.input)
+        output_path = convert_path(args.output)
+        converter.convert_mbtiles_to_directory(input_path, output_path, args.scheme, args.workers, zoom_levels)
     elif args.command == 'dir_to_mbtiles':
-        converter.convert_directory_to_mbtiles(args.input, args.output, args.scheme, args.workers, zoom_levels)
+        # 转换路径
+        input_path = convert_path(args.input)
+        output_path = convert_path(args.output)
+        converter.convert_directory_to_mbtiles(input_path, output_path, args.scheme, args.workers, zoom_levels)
     elif args.command == 'merge':
-        converter.merge_mbtiles(args.input, args.output, args.workers)
+        # 转换路径
+        input_paths = [convert_path(p) for p in args.input]
+        output_path = convert_path(args.output)
+        converter.merge_mbtiles(input_paths, output_path, args.workers)
     elif args.command == 'split':
-        converter.split_mbtiles(args.input, args.output, zoom_levels, args.workers)
+        # 转换路径
+        input_path = convert_path(args.input)
+        output_path = convert_path(args.output)
+        converter.split_mbtiles(input_path, output_path, zoom_levels, args.workers)
     elif args.command == 'compare':
-        converter.compare_mbtiles(args.file1, args.file2)
+        # 转换路径
+        file1_path = convert_path(args.file1)
+        file2_path = convert_path(args.file2)
+        converter.compare_mbtiles(file1_path, file2_path)
     elif args.command == 'analyze':
-        converter.analyze_mbtiles(args.input)
+        # 转换路径
+        input_path = convert_path(args.input)
+        converter.analyze_mbtiles(input_path)
 
 
 if __name__ == "__main__":

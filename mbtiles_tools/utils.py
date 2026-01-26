@@ -6,6 +6,48 @@
 包含MBTiles转换工具所需的各种辅助函数
 """
 
+import os
+from pathlib import Path
+
+
+def convert_path(path_str):
+    """
+    转换路径，支持Windows路径和Linux路径，在WSL2环境中自动转换
+    
+    Args:
+        path_str: 输入的路径，可以是Windows路径（如D:/codes或D:\\codes）或Linux路径（如/mnt/d/codes）
+        
+    Returns:
+        str: 转换后的路径字符串
+    """
+    # 处理不同格式的Windows路径
+    # 1. 检查是否为Windows路径格式（带有盘符）
+    if len(path_str) > 1 and path_str[1] == ':' and any(c in path_str[2:] for c in '/\\'):
+        # 转换Windows路径到WSL2路径
+        # 将盘符转换为/mnt/[小写盘符]
+        drive_letter = path_str[0].lower()
+        
+        # 提取路径部分（去掉盘符和冒号）
+        path_part = path_str[2:]
+        
+        # 替换所有反斜杠为正斜杠
+        # 处理所有可能的反斜杠格式：\, \\, \\\\等
+        wsl_path = path_part.replace('\\', '/')
+        
+        # 构建完整的WSL路径
+        full_path = f"/mnt/{drive_letter}/{wsl_path.lstrip('/')}"
+        print(f"✓ 转换Windows路径到WSL2路径: {path_str} -> {full_path}")
+        return full_path
+    elif len(path_str) > 1 and path_str[1] == ':' and len(path_str) == 2:
+        # 仅盘符的情况，如 E:
+        drive_letter = path_str[0].lower()
+        full_path = f"/mnt/{drive_letter}"
+        print(f"✓ 转换Windows路径到WSL2路径: {path_str} -> {full_path}")
+        return full_path
+    else:
+        # 直接返回Linux路径
+        return path_str
+
 
 def parse_zoom_levels(zoom_args):
     """
