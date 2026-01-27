@@ -17,6 +17,33 @@ import time
 import sys
 from typing import Generator, Tuple
 
+# 路径转换函数：处理Windows路径和Linux路径
+
+def convert_path(output_dir: str) -> Path:
+    """
+    转换路径，支持Windows路径和Linux路径，在WSL2环境中自动转换
+    
+    Args:
+        output_dir: 输入的路径，可以是Windows路径（如D:/codes）或Linux路径（如/mnt/d/codes）
+        
+    Returns:
+        Path: 转换后的Path对象
+    """
+    # 检查是否为Windows路径（包含盘符和反斜杠）
+    if len(output_dir) > 1 and output_dir[1] == ':' and ('\\' in output_dir or '/' in output_dir):
+        # 转换Windows路径到WSL2路径
+        # 将盘符转换为/mnt/[小写盘符]
+        drive_letter = output_dir[0].lower()
+        # 替换反斜杠为正斜杠
+        wsl_path = output_dir[2:].replace('\\', '/')
+        # 构建完整的WSL路径
+        full_path = f"/mnt/{drive_letter}/{wsl_path.lstrip('/')}"
+        logger.info(f"转换Windows路径到WSL2路径: {output_dir} -> {full_path}")
+        return Path(full_path)
+    else:
+        # 直接返回Linux路径
+        return Path(output_dir)
+
 # 确保日志目录存在
 log_dir = 'logs'
 os.makedirs(log_dir, exist_ok=True)
@@ -145,7 +172,7 @@ def get_optimal_threads() -> int:
 
 def batch_merge(source_dir: str, target_dir: str, overwrite: bool = False, max_workers: int = None, debug: bool = False):
     """
-    批量合并瓦片数据（优化版，支持大规模数据）
+    批量合并瓦片数据
     
     Args:
         source_dir: 源瓦片目录
@@ -155,6 +182,10 @@ def batch_merge(source_dir: str, target_dir: str, overwrite: bool = False, max_w
         debug: 是否打印详细的合并信息
     """
     import psutil
+    
+    # 转换路径
+    source_dir = str(convert_path(source_dir))
+    target_dir = str(convert_path(target_dir))
     
     # 统计总任务数
     print("正在统计需要合并的瓦片文件数量...")

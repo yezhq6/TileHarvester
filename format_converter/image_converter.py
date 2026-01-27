@@ -14,6 +14,33 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
+# 路径转换函数：处理Windows路径和Linux路径
+
+def convert_path(output_dir: str) -> Path:
+    """
+    转换路径，支持Windows路径和Linux路径，在WSL2环境中自动转换
+    
+    Args:
+        output_dir: 输入的路径，可以是Windows路径（如D:/codes）或Linux路径（如/mnt/d/codes）
+        
+    Returns:
+        Path: 转换后的Path对象
+    """
+    # 检查是否为Windows路径（包含盘符和反斜杠）
+    if len(output_dir) > 1 and output_dir[1] == ':' and ('\\' in output_dir or '/' in output_dir):
+        # 转换Windows路径到WSL2路径
+        # 将盘符转换为/mnt/[小写盘符]
+        drive_letter = output_dir[0].lower()
+        # 替换反斜杠为正斜杠
+        wsl_path = output_dir[2:].replace('\\', '/')
+        # 构建完整的WSL路径
+        full_path = f"/mnt/{drive_letter}/{wsl_path.lstrip('/')}"
+        print(f"  转换Windows路径到WSL2路径: {output_dir} -> {full_path}")
+        return Path(full_path)
+    else:
+        # 直接返回Linux路径
+        return Path(output_dir)
+
 
 def convert_image(input_path, output_path, output_format):
     """
@@ -154,26 +181,26 @@ def main():
     
     # 处理单个文件转换
     if args.file:
-        input_path = args.file
+        input_path = str(convert_path(args.file))
         
         # 如果没有指定输出路径，在原目录生成转换后的文件
         if not args.output:
             base_name = os.path.splitext(input_path)[0]
             output_path = f"{base_name}.{args.type.lower()}"
         else:
-            output_path = args.output
+            output_path = str(convert_path(args.output))
         
         convert_image(input_path, output_path, args.type)
     
     # 处理批量转换
     elif args.directory:
-        input_dir = args.directory
+        input_dir = str(convert_path(args.directory))
         
         # 如果没有指定输出目录，在原目录同级创建output目录
         if not args.output:
             output_dir = os.path.join(os.path.dirname(input_dir), f"{os.path.basename(input_dir)}_converted")
         else:
-            output_dir = args.output
+            output_dir = str(convert_path(args.output))
         
         batch_convert(input_dir, output_dir, args.type, args.recursive, args.workers)
 
