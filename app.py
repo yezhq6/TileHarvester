@@ -287,6 +287,7 @@ def api_cancel_download():
             
             logger.info("下载任务已取消")
             return jsonify({'success': True, 'message': '下载已取消'})
+        return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
 
 @app.route('/api/pause-download', methods=['POST'])
 def api_pause_download():

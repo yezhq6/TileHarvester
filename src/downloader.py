@@ -109,6 +109,8 @@ class TileDownloader:
 
             self.task_queue: Queue = Queue()
             self.stop_event = Event()
+            self.pause_event = Event()  # 暂停事件
+            self.pause_event.set()  # 初始状态为运行（未暂停）
 
             self.downloaded_count = 0
             self.failed_count = 0
@@ -449,6 +451,20 @@ class TileDownloader:
                 logger.debug(f"{thread_name} 处理任务: z={z}, x={x}, y={y}")
                 
                 try:
+                    # 检查是否暂停
+                    if not self.pause_event.is_set():
+                        logger.info(f"{thread_name} - 任务已暂停，等待恢复")
+                        self.pause_event.wait(timeout=1)  # 等待直到恢复或超时
+                        
+                        # 如果超时后仍然暂停，跳过当前任务
+                        if not self.pause_event.is_set():
+                            logger.info(f"{thread_name} - 任务仍然暂停，跳过当前任务")
+                            self._mark_tile_processed(x, y, z, 'skipped')
+                            self._update_progress()
+                            self.task_queue.task_done()
+                            processed_in_batch += 1
+                            continue
+                    
                     # zoom 范围检查
                     if not (self.provider.min_zoom <= z <= self.provider.max_zoom):
                         logger.warning(
@@ -621,6 +637,29 @@ class TileDownloader:
             "skipped": self.skipped_count,
             "total": self.downloaded_count + self.failed_count + self.skipped_count,
         }
+    
+    def pause(self):
+        """
+        暂停下载任务
+        """
+        logger.info("暂停下载任务")
+        self.pause_event.clear()  # 清除事件，使线程暂停
+    
+    def resume(self):
+        """
+        恢复下载任务
+        """
+        logger.info("恢复下载任务")
+        self.pause_event.set()  # 设置事件，使线程继续
+    
+    def is_paused(self) -> bool:
+        """
+        检查下载是否已暂停
+        
+        Returns:
+            bool: 是否已暂停
+        """
+        return not self.pause_event.is_set()
 
 
 class BatchDownloader:
