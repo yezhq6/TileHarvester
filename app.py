@@ -139,6 +139,34 @@ def api_download():
             # 直接使用TileDownloader而不是BatchDownloader，以便保存实例
             global current_downloader
             with current_downloader_lock:
+                # 检查是否已经有正在进行的下载任务，如果有，先取消它
+                if current_downloader:
+                    logger.info("发现正在进行的下载任务，正在取消...")
+                    # 保存当前进度
+                    if hasattr(current_downloader, '_save_progress'):
+                        try:
+                            current_downloader._save_progress()
+                            logger.info("取消旧任务时保存进度")
+                        except Exception as e:
+                            logger.error(f"保存进度失败: {e}")
+                    # 清空任务队列
+                    while True:
+                        try:
+                            current_downloader.task_queue.get_nowait()
+                            current_downloader.task_queue.task_done()
+                        except Empty:
+                            break
+                    # 触发停止事件
+                    current_downloader.stop_event.set()
+                    # 重置暂停事件
+                    current_downloader.pause_event.set()
+                    # 等待一小段时间，让线程有机会处理停止事件
+                    time.sleep(0.2)
+                    # 清空全局变量
+                    current_downloader = None
+                    logger.info("旧下载任务已取消")
+                
+                # 创建新的下载器实例
                 current_downloader = TileDownloader(
                     provider_name,
                     output_dir,
@@ -269,49 +297,101 @@ def api_cancel_download():
     """取消当前下载任务"""
     global current_downloader
     
-    with current_downloader_lock:
-        if current_downloader:
-            # 清空任务队列，立即停止所有下载
-            while True:
-                try:
-                    current_downloader.task_queue.get_nowait()
-                    current_downloader.task_queue.task_done()
-                except Empty:
-                    break
-            
-            # 触发停止事件
-            current_downloader.stop_event.set()
-            
-            # 清空全局变量
-            current_downloader = None
-            
-            logger.info("下载任务已取消")
-            return jsonify({'success': True, 'message': '下载已取消'})
-        return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    try:
+        with current_downloader_lock:
+            if current_downloader:
+                # 保存当前进度
+                if hasattr(current_downloader, '_save_progress'):
+                    try:
+                        current_downloader._save_progress()
+                        logger.info("取消下载时保存进度")
+                    except Exception as e:
+                        logger.error(f"保存进度失败: {e}")
+                
+                # 清空任务队列，立即停止所有下载
+                tasks_cleared = 0
+                while True:
+                    try:
+                        current_downloader.task_queue.get_nowait()
+                        try:
+                            current_downloader.task_queue.task_done()
+                            tasks_cleared += 1
+                        except ValueError:
+                            # 避免 task_done() 被调用过多
+                            logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
+                            break
+                    except Empty:
+                        break
+                logger.info(f"已清空任务队列，共清除 {tasks_cleared} 个任务")
+                
+                # 触发停止事件
+                current_downloader.stop_event.set()
+                
+                # 重置暂停事件，确保下次下载不受影响
+                current_downloader.pause_event.set()
+                
+                # 等待一小段时间，让线程有机会处理停止事件
+                time.sleep(0.5)
+                
+                # 获取当前下载的统计信息
+                stats = {
+                    'downloaded': current_downloader.downloaded_count,
+                    'failed': current_downloader.failed_count,
+                    'skipped': current_downloader.skipped_count,
+                    'total': current_downloader.total_tasks,
+                    'remaining': max(0, current_downloader.total_tasks - (current_downloader.downloaded_count + current_downloader.failed_count + current_downloader.skipped_count))
+                }
+                
+                # 清空全局变量
+                current_downloader = None
+                
+                logger.info(f"下载任务已取消: 已下载={stats['downloaded']}, 失败={stats['failed']}, 跳过={stats['skipped']}, 总计={stats['total']}, 剩余={stats['remaining']}")
+                return jsonify({'success': True, 'message': '下载已取消', 'stats': stats})
+            return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    except Exception as e:
+        logger.error(f"取消下载时发生异常: {e}")
+        return jsonify({'success': False, 'message': f'取消下载时发生异常: {str(e)}'})
 
 @app.route('/api/pause-download', methods=['POST'])
 def api_pause_download():
     """暂停当前下载任务"""
     global current_downloader
     
-    with current_downloader_lock:
-        if current_downloader:
-            current_downloader.pause()
-            logger.info("下载任务已暂停")
-            return jsonify({'success': True, 'message': '下载已暂停'})
-        return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    try:
+        with current_downloader_lock:
+            if current_downloader:
+                current_downloader.pause()
+                
+                # 暂停时保存进度
+                if hasattr(current_downloader, '_save_progress'):
+                    try:
+                        current_downloader._save_progress()
+                        logger.info("暂停下载时保存进度")
+                    except Exception as e:
+                        logger.error(f"保存进度失败: {e}")
+                
+                logger.info("下载任务已暂停")
+                return jsonify({'success': True, 'message': '下载已暂停'})
+            return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    except Exception as e:
+        logger.error(f"暂停下载时发生异常: {e}")
+        return jsonify({'success': False, 'message': f'暂停下载时发生异常: {str(e)}'})
 
 @app.route('/api/resume-download', methods=['POST'])
 def api_resume_download():
     """继续当前下载任务"""
     global current_downloader
     
-    with current_downloader_lock:
-        if current_downloader:
-            current_downloader.resume()
-            logger.info("下载任务已恢复")
-            return jsonify({'success': True, 'message': '下载已恢复'})
-        return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    try:
+        with current_downloader_lock:
+            if current_downloader:
+                current_downloader.resume()
+                logger.info("下载任务已恢复")
+                return jsonify({'success': True, 'message': '下载已恢复'})
+            return jsonify({'success': False, 'message': '没有正在进行的下载任务'})
+    except Exception as e:
+        logger.error(f"恢复下载时发生异常: {e}")
+        return jsonify({'success': False, 'message': f'恢复下载时发生异常: {str(e)}'})
 
 @app.route('/api/download-status', methods=['GET'])
 def api_download_status():

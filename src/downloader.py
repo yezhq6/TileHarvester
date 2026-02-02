@@ -1,6 +1,8 @@
 # src/downloader.py
 import time
 import os
+import signal
+import sys
 from pathlib import Path
 from queue import Queue, Empty
 import threading
@@ -128,6 +130,7 @@ class TileDownloader:
             # 进度持久化相关
             self.progress_file = self.output_dir / f".{provider_name}_progress.json"
             self.processed_tiles = set()  # 已处理的瓦片集合，格式为(x,y,z)
+            self.progress_lock = threading.Lock()  # 保护进度文件写入
 
             # 创建输出目录
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -140,33 +143,78 @@ class TileDownloader:
             if self.is_mbtiles:
                 self._init_mbtiles()
             
+            # 注册信号处理
+            self._register_signal_handlers()
+            
             logger.info(f"初始化下载器: provider={provider_name}, threads={max_threads}, output_path={self.output_path}, save_format={self.save_format}")
             logger.info(f"断点续传: {'已启用' if self.enable_resume else '已禁用'}")
         except Exception as e:
             logger.error(f"初始化下载器失败: {e}")
+            # 初始化失败时也尝试保存进度
+            if self.enable_resume:
+                try:
+                    self._save_progress()
+                except:
+                    pass
             raise
 
     def _load_progress(self):
         """
-        从文件加载已下载的进度
+        从文件加载已下载的进度，增加错误处理和兼容性
         """
         import json
         if self.progress_file.exists():
             try:
                 with open(self.progress_file, 'r', encoding='utf-8') as f:
-                    progress = json.load(f)
+                    # 读取文件内容
+                    content = f.read()
+                    # 尝试解析JSON
+                    progress = json.loads(content)
                 
                 # 只加载已处理的瓦片列表，计数在每次运行时重新开始
                 processed_tiles = progress.get('processed_tiles', [])
-                self.processed_tiles = set(tuple(tile) for tile in processed_tiles)
                 
-                # 加载total_tasks和total_bytes，用于统计
-                self.total_tasks = progress.get('total_tasks', 0)
-                self.total_bytes = progress.get('total_bytes', 0)
+                # 确保processed_tiles是列表且每个元素是可转换为元组的
+                if isinstance(processed_tiles, list):
+                    valid_tiles = []
+                    for tile in processed_tiles:
+                        try:
+                            if isinstance(tile, (list, tuple)) and len(tile) == 3:
+                                valid_tiles.append(tuple(map(int, tile)))
+                        except (ValueError, TypeError):
+                            continue
+                    self.processed_tiles = set(valid_tiles)
+                else:
+                    self.processed_tiles = set()
+                
+                # 加载其他进度信息
+                self.total_tasks = int(progress.get('total_tasks', 0))
+                self.total_bytes = int(progress.get('total_bytes', 0))
+                
+                # 加载保存格式和scheme信息
+                if 'save_format' in progress:
+                    self.save_format = progress['save_format'].lower()
+                    self.is_mbtiles = self.save_format == "mbtiles"
+                if 'scheme' in progress:
+                    self.scheme = progress['scheme'].lower()
                 
                 logger.info(f"已加载进度: 已处理瓦片={len(self.processed_tiles)}, 总任务数={self.total_tasks}, 总字节数={self.total_bytes}")
+            except json.JSONDecodeError as e:
+                logger.error(f"进度文件格式错误: {e}")
+                # 尝试备份损坏的进度文件
+                try:
+                    backup_file = self.progress_file.with_suffix('.backup')
+                    if self.progress_file.exists():
+                        self.progress_file.rename(backup_file)
+                        logger.info(f"已备份损坏的进度文件到: {backup_file}")
+                except Exception as backup_error:
+                    logger.error(f"备份损坏的进度文件失败: {backup_error}")
+                # 重置进度
+                self.processed_tiles = set()
             except Exception as e:
                 logger.error(f"加载进度失败: {e}")
+                # 重置进度
+                self.processed_tiles = set()
         else:
             logger.info(f"未找到进度文件: {self.progress_file}")
     
@@ -226,28 +274,67 @@ class TileDownloader:
                 self.mbtiles_conn.close()
             raise
     
+    def _register_signal_handlers(self):
+        """
+        注册信号处理函数，在程序崩溃时保存进度
+        """
+        def signal_handler(sig, frame):
+            logger.info(f"收到信号 {sig}，正在保存进度...")
+            if self.enable_resume:
+                try:
+                    self._save_progress()
+                    logger.info("进度已保存，程序退出")
+                except Exception as e:
+                    logger.error(f"保存进度失败: {e}")
+            # 对于SIGINT，允许程序正常退出
+            if sig == signal.SIGINT:
+                sys.exit(0)
+        
+        # 注册信号处理
+        try:
+            signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+            signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
+        except Exception as e:
+            logger.warning(f"注册信号处理失败: {e}")
+    
     def _save_progress(self):
         """
-        将当前进度保存到文件
+        将当前进度保存到文件，使用锁保护避免并发写入
         """
         import json
-        try:
-            progress = {
-                'downloaded_count': self.downloaded_count,
-                'failed_count': self.failed_count,
-                'skipped_count': self.skipped_count,
-                'total_tasks': self.total_tasks,
-                'total_bytes': self.total_bytes,
-                'processed_tiles': list(self.processed_tiles),
-                'timestamp': time.time()
-            }
-            
-            with open(self.progress_file, 'w', encoding='utf-8') as f:
-                json.dump(progress, f, ensure_ascii=False, indent=2)
-            
-            logger.debug(f"进度已保存到: {self.progress_file}")
-        except Exception as e:
-            logger.error(f"保存进度失败: {e}")
+        if not self.enable_resume:
+            return
+        
+        with self.progress_lock:
+            try:
+                # 创建临时文件，写入成功后再替换原文件
+                temp_file = self.progress_file.with_suffix('.tmp')
+                
+                progress = {
+                    'downloaded_count': self.downloaded_count,
+                    'failed_count': self.failed_count,
+                    'skipped_count': self.skipped_count,
+                    'total_tasks': self.total_tasks,
+                    'total_bytes': self.total_bytes,
+                    'processed_tiles': list(self.processed_tiles),
+                    'timestamp': time.time(),
+                    'save_format': self.save_format,
+                    'scheme': self.scheme
+                }
+                
+                # 确保输出目录存在
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+                
+                # 写入临时文件
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(progress, f, ensure_ascii=False, indent=2)
+                
+                # 原子性替换文件
+                temp_file.replace(self.progress_file)
+                
+                logger.debug(f"进度已保存到: {self.progress_file}")
+            except Exception as e:
+                logger.error(f"保存进度失败: {e}")
     
     def _is_tile_processed(self, x: int, y: int, z: int) -> bool:
         """
@@ -416,6 +503,11 @@ class TileDownloader:
                 except Exception as e:
                     logger.error(f"关闭MBTiles数据库失败: {e}")
             
+            # 下载完成后保存进度
+            if self.enable_resume:
+                self._save_progress()
+                logger.info("下载完成，进度已保存")
+            
             logger.info(
                 f"结束下载: 成功={self.downloaded_count}, 失败={self.failed_count}, "
                 f"跳过={self.skipped_count}, 总计={self.total_tasks}"
@@ -426,6 +518,13 @@ class TileDownloader:
                 self.progress_callback(self.downloaded_count, self.total_tasks, self.total_bytes)
         except Exception as e:
             logger.error(f"下载过程中发生异常: {e}")
+            # 发生异常时也保存进度
+            if self.enable_resume:
+                try:
+                    self._save_progress()
+                    logger.info("异常发生，进度已保存")
+                except Exception as save_error:
+                    logger.error(f"保存进度失败: {save_error}")
             self.stop_event.set()
             raise
 
@@ -439,31 +538,45 @@ class TileDownloader:
         processed_in_batch = 0  # 用于定期保存进度的计数器
         
         while not self.stop_event.is_set():
+            # 先检查是否暂停
+            if not self.pause_event.is_set():
+                logger.info(f"{thread_name} - 任务已暂停，等待恢复")
+                self.pause_event.wait()  # 无限等待直到恢复
+                if self.stop_event.is_set():
+                    break
+                continue
+            
             try:
                 # 获取任务，设置超时
                 task = self.task_queue.get(timeout=1)
                 if task is None:
-                    self._update_progress()
-                    self.task_queue.task_done()
+                    try:
+                        self._update_progress()
+                        self.task_queue.task_done()
+                    except ValueError:
+                        # 避免 task_done() 被调用过多
+                        logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
                     continue
                 
                 x, y, z = task
                 logger.debug(f"{thread_name} 处理任务: z={z}, x={x}, y={y}")
                 
                 try:
-                    # 检查是否暂停
+                    # 再次检查是否暂停
                     if not self.pause_event.is_set():
-                        logger.info(f"{thread_name} - 任务已暂停，等待恢复")
-                        self.pause_event.wait(timeout=1)  # 等待直到恢复或超时
-                        
-                        # 如果超时后仍然暂停，跳过当前任务
-                        if not self.pause_event.is_set():
-                            logger.info(f"{thread_name} - 任务仍然暂停，跳过当前任务")
-                            self._mark_tile_processed(x, y, z, 'skipped')
-                            self._update_progress()
+                        logger.info(f"{thread_name} - 任务已暂停，将任务放回队列")
+                        # 将任务重新放回队列，以便在恢复时继续处理
+                        self.task_queue.put((x, y, z))
+                        try:
                             self.task_queue.task_done()
-                            processed_in_batch += 1
-                            continue
+                        except ValueError:
+                            # 避免 task_done() 被调用过多
+                            logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
+                        # 无限等待直到恢复
+                        self.pause_event.wait()
+                        if self.stop_event.is_set():
+                            break
+                        continue
                     
                     # zoom 范围检查
                     if not (self.provider.min_zoom <= z <= self.provider.max_zoom):
@@ -472,7 +585,11 @@ class TileDownloader:
                         )
                         self._mark_tile_processed(x, y, z, 'skipped')
                         self._update_progress()
-                        self.task_queue.task_done()
+                        try:
+                            self.task_queue.task_done()
+                        except ValueError:
+                            # 避免 task_done() 被调用过多
+                            logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
                         processed_in_batch += 1
                         continue
 
@@ -485,7 +602,11 @@ class TileDownloader:
                             logger.debug(f"{thread_name} - [跳过] 已存在: {file_path}")
                             self._mark_tile_processed(x, y, z, 'skipped')
                             self._update_progress()
-                            self.task_queue.task_done()
+                            try:
+                                self.task_queue.task_done()
+                            except ValueError:
+                                # 避免 task_done() 被调用过多
+                                logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
                             processed_in_batch += 1
                             continue
 
@@ -497,72 +618,133 @@ class TileDownloader:
                     
                     ok = False
                     for attempt in range(self.retries):
+                        # 检查是否需要停止
+                        if self.stop_event.is_set():
+                            logger.info(f"{thread_name} - 收到停止信号，取消当前任务")
+                            break
+                        
+                        # 检查是否暂停
+                        if not self.pause_event.is_set():
+                            logger.info(f"{thread_name} - 任务已暂停，等待恢复")
+                            self.pause_event.wait(timeout=1)  # 等待直到恢复或超时
+                            
+                            # 如果超时后仍然暂停，跳过当前任务
+                            if not self.pause_event.is_set():
+                                logger.info(f"{thread_name} - 任务仍然暂停，跳过当前任务")
+                                self._mark_tile_processed(x, y, z, 'skipped')
+                                self._update_progress()
+                                try:
+                                    self.task_queue.task_done()
+                                except ValueError:
+                                    # 避免 task_done() 被调用过多
+                                    logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
+                                processed_in_batch += 1
+                                return
+                        
                         try:
                             logger.debug(f"{thread_name} - 下载: {url} (尝试 {attempt+1}/{self.retries})")
                             
-                            # 禁用代理，直接连接
-                            resp = requests.get(
-                                url, 
-                                timeout=self.timeout, 
-                                stream=True, 
-                                proxies={'http': None, 'https': None},
-                                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                            )
+                            # 使用会话对象，支持超时和取消
+                            session = requests.Session()
+                            request = requests.Request('GET', url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+                            prepared = session.prepare_request(request)
                             
-                            if resp.status_code == 200:
-                                # 验证响应内容
-                                content_type = resp.headers.get('Content-Type', '')
-                                if not ('image' in content_type or 'jpeg' in content_type or 'png' in content_type):
-                                    logger.warning(f"{thread_name} - 非图片响应: {url}, Content-Type: {content_type}")
-                                    continue
-                                
-                                # 获取响应内容
-                                tile_data = resp.content
-                                total_bytes = len(tile_data)
-                                
-                                if self.is_mbtiles:
-                                    # 保存到MBTiles数据库
-                                    try:
-                                        # MBTiles中的tile_row是从顶部开始计数的，需要转换
-                                        mbtiles_row = (2 ** z) - 1 - y
-                                        
-                                        # 使用锁保护MBTiles操作，避免多个线程同时使用游标
-                                        with self.mbtiles_lock:
-                                            # 直接使用连接执行SQL，避免递归使用同一个游标
-                                            self.mbtiles_conn.execute(
-                                                '''INSERT OR REPLACE INTO tiles 
-                                                (zoom_level, tile_column, tile_row, tile_data) 
-                                                VALUES (?, ?, ?, ?)''',
-                                                (z, x, mbtiles_row, tile_data)
-                                            )
-                                            
-                                            # 每100个瓦片提交一次事务
-                                            if self.downloaded_count % 100 == 0:
-                                                self.mbtiles_conn.commit()
-                                        
-                                        logger.info(f"{thread_name} - 下载成功: MBTiles [{z}/{x}/{y}] ({total_bytes} 字节)")
-                                    except Exception as e:
-                                        logger.error(f"{thread_name} - MBTiles保存失败: {e}")
-                                        continue
-                                else:
-                                    # 保存到文件系统
-                                    with open(file_path, "wb") as f:
-                                        f.write(tile_data)
+                            # 创建一个可中断的请求
+                            with requests.Session() as session:
+                                # 设置更小的超时，以便能及时响应暂停/停止信号
+                                response = None
+                                try:
+                                    # 分块下载，以便在下载过程中检查暂停/停止信号
+                                    response = session.send(prepared, stream=True, timeout=3, proxies={'http': None, 'https': None})
                                     
-                                    logger.info(f"{thread_name} - 下载成功: {file_path} ({total_bytes} 字节)")
-                                
-                                ok = True
-                                self.total_bytes += total_bytes  # 更新总字节数
-                                self._mark_tile_processed(x, y, z, 'success')
-                                break
-                            else:
-                                logger.warning(
-                                    f"{thread_name} - [HTTP {resp.status_code}] {url}"
-                                )
-                                if resp.status_code in [403, 404]:
-                                    # 403禁止访问或404不存在，直接跳过
-                                    logger.warning(f"{thread_name} - 永久错误，停止重试: {url}")
+                                    # 检查响应状态
+                                    if response.status_code != 200:
+                                        logger.warning(f"{thread_name} - [HTTP {response.status_code}] {url}")
+                                        if response.status_code in [403, 404]:
+                                            # 403禁止访问或404不存在，直接跳过
+                                            logger.warning(f"{thread_name} - 永久错误，停止重试: {url}")
+                                            break
+                                        continue
+                                    
+                                    # 验证响应内容
+                                    content_type = response.headers.get('Content-Type', '')
+                                    if not ('image' in content_type or 'jpeg' in content_type or 'png' in content_type):
+                                        logger.warning(f"{thread_name} - 非图片响应: {url}, Content-Type: {content_type}")
+                                        continue
+                                    
+                                    # 分块读取响应内容
+                                    tile_data = b''
+                                    for chunk in response.iter_content(chunk_size=1024):
+                                        # 检查是否需要停止
+                                        if self.stop_event.is_set():
+                                            logger.info(f"{thread_name} - 收到停止信号，取消当前下载")
+                                            ok = False
+                                            break
+                                        
+                                        # 检查是否暂停
+                                        if not self.pause_event.is_set():
+                                            logger.info(f"{thread_name} - 任务已暂停，将任务放回队列")
+                                            # 将任务重新放回队列，以便在恢复时继续处理
+                                            self.task_queue.put((x, y, z))
+                                            try:
+                                                self.task_queue.task_done()
+                                            except ValueError:
+                                                # 避免 task_done() 被调用过多
+                                                logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
+                                            # 无限等待直到恢复
+                                            self.pause_event.wait()
+                                            if self.stop_event.is_set():
+                                                return
+                                            ok = False
+                                            break
+                                        
+                                        if chunk:
+                                            tile_data += chunk
+                                    
+                                    # 如果在分块读取过程中被停止，退出循环
+                                    if self.stop_event.is_set():
+                                        break
+                                    
+                                    total_bytes = len(tile_data)
+                                    
+                                    if self.is_mbtiles:
+                                        # 保存到MBTiles数据库
+                                        try:
+                                            # MBTiles中的tile_row是从顶部开始计数的，需要转换
+                                            mbtiles_row = (2 ** z) - 1 - y
+                                            
+                                            # 使用锁保护MBTiles操作，避免多个线程同时使用游标
+                                            with self.mbtiles_lock:
+                                                # 直接使用连接执行SQL，避免递归使用同一个游标
+                                                self.mbtiles_conn.execute(
+                                                    '''INSERT OR REPLACE INTO tiles 
+                                                    (zoom_level, tile_column, tile_row, tile_data) 
+                                                    VALUES (?, ?, ?, ?)''',
+                                                    (z, x, mbtiles_row, tile_data)
+                                                )
+                                                
+                                                # 每100个瓦片提交一次事务
+                                                if self.downloaded_count % 100 == 0:
+                                                    self.mbtiles_conn.commit()
+                                            
+                                            logger.info(f"{thread_name} - 下载成功: MBTiles [{z}/{x}/{y}] ({total_bytes} 字节)")
+                                        except Exception as e:
+                                            logger.error(f"{thread_name} - MBTiles保存失败: {e}")
+                                            continue
+                                    else:
+                                        # 保存到文件系统
+                                        with open(file_path, "wb") as f:
+                                            f.write(tile_data)
+                                        
+                                        logger.info(f"{thread_name} - 下载成功: {file_path} ({total_bytes} 字节)")
+                                    
+                                    ok = True
+                                    self.total_bytes += total_bytes  # 更新总字节数
+                                    self._mark_tile_processed(x, y, z, 'success')
                                     break
+                                finally:
+                                    if response:
+                                        response.close()
                         except requests.exceptions.ConnectionError as e:
                             logger.error(f"{thread_name} - 连接错误 {url} - {e}")
                         except requests.exceptions.Timeout as e:
@@ -574,12 +756,38 @@ class TileDownloader:
                         except Exception as e:
                             logger.error(f"{thread_name} - 未知错误 {url} - {e}")
                         
+                        # 检查是否需要停止
+                        if self.stop_event.is_set():
+                            logger.info(f"{thread_name} - 收到停止信号，停止重试")
+                            break
+                        
                         # 指数退避重试，增加最大延迟限制
                         retry_delay = min(
                             self.delay * (2 ** attempt) * (0.5 + 0.5 * (hash(url) % 2)),
-                            60  # 最大延迟60秒
+                            10  # 减少最大延迟到10秒，以便更快响应暂停/停止信号
                         )
-                        time.sleep(retry_delay)
+                        
+                        # 在重试延迟期间定期检查暂停/停止信号
+                        start_time = time.time()
+                        while time.time() - start_time < retry_delay:
+                            if self.stop_event.is_set():
+                                logger.info(f"{thread_name} - 收到停止信号，停止重试")
+                                break
+                            if not self.pause_event.is_set():
+                                logger.info(f"{thread_name} - 任务已暂停，将任务放回队列")
+                                # 将任务重新放回队列，以便在恢复时继续处理
+                                self.task_queue.put((x, y, z))
+                                try:
+                                    self.task_queue.task_done()
+                                except ValueError:
+                                    # 避免 task_done() 被调用过多
+                                    logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
+                                # 无限等待直到恢复
+                                self.pause_event.wait()
+                                if self.stop_event.is_set():
+                                    return
+                                return
+                            time.sleep(0.1)
 
                     if not ok:
                         logger.error(f"{thread_name} - 下载失败: {url}")
@@ -591,13 +799,21 @@ class TileDownloader:
                     logger.error(f"{thread_name} - 任务处理错误: z={z}, x={x}, y={y} - {e}")
                     self._mark_tile_processed(x, y, z, 'failed')
                     self._update_progress()
-                    self.task_queue.task_done()
+                    try:
+                        self.task_queue.task_done()
+                    except ValueError:
+                        # 避免 task_done() 被调用过多
+                        logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
                     processed_in_batch += 1
                 else:
                     # 更新进度
                     self._update_progress()
                     # 标记任务完成 - 只调用一次
-                    self.task_queue.task_done()
+                    try:
+                        self.task_queue.task_done()
+                    except ValueError:
+                        # 避免 task_done() 被调用过多
+                        logger.warning("任务队列可能已被清空，跳过 task_done() 调用")
                     processed_in_batch += 1
                 
                 # 每处理100个瓦片保存一次进度
@@ -643,14 +859,25 @@ class TileDownloader:
         暂停下载任务
         """
         logger.info("暂停下载任务")
-        self.pause_event.clear()  # 清除事件，使线程暂停
+        # 清除事件，使线程暂停
+        self.pause_event.clear()
+        # 保存当前进度
+        if self.enable_resume:
+            try:
+                self._save_progress()
+                logger.info("暂停下载时保存进度")
+            except Exception as e:
+                logger.error(f"保存进度失败: {e}")
     
     def resume(self):
         """
         恢复下载任务
         """
         logger.info("恢复下载任务")
-        self.pause_event.set()  # 设置事件，使线程继续
+        # 设置事件，使线程继续
+        self.pause_event.set()
+        # 注意：任务队列在暂停时已经被清空，需要在调用 resume 后重新添加任务
+        # 这部分逻辑需要在调用 resume 的地方处理，例如在 API 层
     
     def is_paused(self) -> bool:
         """
