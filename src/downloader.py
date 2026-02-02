@@ -406,7 +406,7 @@ class TileDownloader:
         batch_size: int = 10000  # 每批处理的任务数量，默认10000个
     ):
         """
-        根据经纬度范围添加任务，支持多个缩放级别，分批处理避免内存占用过高
+        根据经纬度范围添加任务，支持多个缩放级别，流式处理避免内存占用过高
         
         Args:
             west: 西边界经度
@@ -422,8 +422,6 @@ class TileDownloader:
             f"min_zoom={min_zoom}, max_zoom={max_zoom}, is_tms={self.is_tms}"
         )
 
-        # 先计算所有瓦片任务
-        all_tiles = []
         total_tiles = 0
         
         for zoom in range(min_zoom, max_zoom + 1):
@@ -434,24 +432,20 @@ class TileDownloader:
             total_tiles += tile_count
             logger.info(f"缩放级别 {zoom}: 找到 {tile_count} 个瓦片")
             
-            # 将当前缩放级别的瓦片添加到总列表中
-            for x, y in xy_tiles:
-                all_tiles.append((x, y, zoom))
+            # 流式添加当前缩放级别的任务
+            batch_count = 0
+            for i, (x, y) in enumerate(xy_tiles):
+                self.add_task(x, y, zoom)
+                batch_count += 1
+                
+                # 每批添加后短暂休眠，避免内存占用过高
+                if batch_count >= batch_size:
+                    logger.debug(f"缩放级别 {zoom}: 已添加 {batch_count} 个瓦片任务")
+                    time.sleep(0.01)  # 更短的休眠时间，提高响应速度
+                    batch_count = 0
         
         self.total_tasks = total_tiles
-        logger.info(f"总计: {total_tiles} 个瓦片任务，将按每批 {batch_size} 个进行处理")
-        
-        # 分批添加任务到队列
-        for i in range(0, total_tiles, batch_size):
-            batch = all_tiles[i:i+batch_size]
-            logger.debug(f"添加第 {i//batch_size + 1} 批任务，共 {len(batch)} 个瓦片")
-            
-            for x, y, z in batch:
-                self.add_task(x, y, z)
-            
-            # 每批添加后短暂休眠，避免内存占用过高
-            if i + batch_size < total_tiles:
-                time.sleep(0.1)
+        logger.info(f"总计: {total_tiles} 个瓦片任务")
 
     def start(self):
         """
@@ -461,11 +455,11 @@ class TileDownloader:
             logger.info(f"开始下载，线程数={self.max_threads}，provider={self.provider.name}")
             
             # 计算实际需要的线程数
-            # 基础线程数：不超过配置的最大线程数、不超过任务数、不超过系统CPU核心数*2
+            # 基础线程数：不超过配置的最大线程数、不超过系统CPU核心数*2
+            # 注意：不再使用task_queue.qsize()，因为此时队列可能为空
             cpu_cores = os.cpu_count() or 4
             base_threads = min(
                 self.max_threads, 
-                self.task_queue.qsize(), 
                 cpu_cores * 2,  # 根据CPU核心数动态调整，充分利用系统资源
                 32  # 限制最大线程数为32，避免资源耗尽
             )
@@ -474,48 +468,15 @@ class TileDownloader:
             
             logger.info(f"实际使用线程数: {actual_threads}, CPU核心数: {cpu_cores}")
             
-            threads = []
-            
             # 创建线程
             for i in range(actual_threads):
                 t = Thread(target=self._worker, name=f"Downloader-{i+1}", daemon=True)
                 t.start()
-                threads.append(t)
                 time.sleep(0.05)  # 线程启动延迟，避免同时请求过多
 
-            # 等待任务队列清空
-            self.task_queue.join()
-            
-            # 停止事件
-            self.stop_event.set()
-
-            # 等待所有线程结束
-            for t in threads:
-                t.join(timeout=5)  # 设置超时，避免线程永久阻塞
-
-            # 如果是MBTiles格式，提交最终事务并关闭数据库连接
-            if self.is_mbtiles and self.mbtiles_conn:
-                try:
-                    self.mbtiles_conn.commit()
-                    self.mbtiles_cursor.close()
-                    self.mbtiles_conn.close()
-                    logger.info(f"MBTiles数据库已关闭: {self.mbtiles_path}")
-                except Exception as e:
-                    logger.error(f"关闭MBTiles数据库失败: {e}")
-            
-            # 下载完成后保存进度
-            if self.enable_resume:
-                self._save_progress()
-                logger.info("下载完成，进度已保存")
-            
-            logger.info(
-                f"结束下载: 成功={self.downloaded_count}, 失败={self.failed_count}, "
-                f"跳过={self.skipped_count}, 总计={self.total_tasks}"
-            )
-            
-            # 下载完成后调用进度回调
-            if self.progress_callback:
-                self.progress_callback(self.downloaded_count, self.total_tasks, self.total_bytes)
+            # 不等待任务队列清空，直接返回
+            # 工作线程会持续运行，直到stop_event被设置
+            logger.info("下载线程已启动，将持续处理任务")
         except Exception as e:
             logger.error(f"下载过程中发生异常: {e}")
             # 发生异常时也保存进度

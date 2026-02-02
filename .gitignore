@@ -20,6 +20,12 @@ format_converter/tiles1/
 format_converter/tiles2/
 mbtiles_tools/test/
 mbtiles_tools/test2/
+test_output/
+test_output_new/
+test_performance/
+
+# Config directories
+configs/
 
 # OS files
 .DS_Store

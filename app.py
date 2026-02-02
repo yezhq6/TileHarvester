@@ -30,6 +30,11 @@ app.config['MAX_THREADS'] = 32  # 限制最大线程数
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 logger.info(f"应用启动，瓦片存储目录: {app.config['UPLOAD_FOLDER']}")
 
+# 确保配置目录存在
+app.config['CONFIG_FOLDER'] = 'configs'
+os.makedirs(app.config['CONFIG_FOLDER'], exist_ok=True)
+logger.info(f"应用启动，配置存储目录: {app.config['CONFIG_FOLDER']}")
+
 # 全局下载控制
 current_downloader = None
 current_downloader_lock = threading.Lock()
@@ -177,23 +182,11 @@ def api_download():
                     save_format=save_format,
                     scheme=scheme
                 )
-                
-                # 添加下载任务
-                current_downloader.add_tasks_for_bbox(
-                    west, south, east, north, min_zoom, max_zoom
-                )
-                total_tasks = current_downloader.total_tasks
-                stats = {
-                    'downloaded': 0,
-                    'failed': 0,
-                    'skipped': 0,
-                    'total': total_tasks
-                }
             
-            # 发送初始进度更新
-            update_progress(0, total_tasks)
+            # 发送初始进度更新（暂时使用0作为总任务数，后续会更新）
+            update_progress(0, 0)
             
-            # 启动下载（在单独的线程中）
+            # 启动下载线程（先启动线程，再添加任务，实现真正的流式下载）
             def start_download():
                 try:
                     global current_downloader
@@ -201,57 +194,92 @@ def api_download():
                         downloader = current_downloader
                     
                     if downloader:
+                        # 启动下载线程
                         downloader.start()
+                except Exception as e:
+                    logger.error(f"下载线程异常: {e}")
+            
+            # 添加任务的线程函数
+            def add_tasks():
+                try:
+                    global current_downloader
+                    with current_downloader_lock:
+                        downloader = current_downloader
+                    
+                    if downloader:
+                        # 添加下载任务（流式处理）
+                        downloader.add_tasks_for_bbox(
+                            west, south, east, north, min_zoom, max_zoom
+                        )
+                        total_tasks = downloader.total_tasks
+                        stats = {
+                            'downloaded': 0,
+                            'failed': 0,
+                            'skipped': 0,
+                            'total': total_tasks
+                        }
                         
-                        # 下载完成后发送最终进度更新
+                        # 更新总任务数
+                        update_progress(0, total_tasks)
+                except Exception as e:
+                    logger.error(f"添加任务失败: {e}")
+            
+            # 启动下载线程
+            threading.Thread(target=start_download, daemon=True).start()
+            
+            # 在单独线程中添加任务（实现真正的并行处理）
+            threading.Thread(target=add_tasks, daemon=True).start()
+            
+            # 下载完成后发送最终进度更新
+            def send_final_update():
+                try:
+                    global current_downloader
+                    with current_downloader_lock:
+                        downloader = current_downloader
+                    
+                    if downloader:
                         stats = {
                             'downloaded': downloader.downloaded_count,
                             'failed': downloader.failed_count,
                             'skipped': downloader.skipped_count,
                             'total': downloader.total_tasks
                         }
-                        update_progress(
-                            downloaded=downloader.downloaded_count,
-                            total=downloader.total_tasks,
-                            completed=True,
-                            stats=stats
-                        )
-                        
-                    # 下载完成后清空全局变量
-                    with current_downloader_lock:
-                        current_downloader = None
+                        update_progress(downloader.downloaded_count, downloader.total_tasks, completed=True, stats=stats)
                 except Exception as e:
-                    logger.error(f"下载线程异常: {e}")
-                    # 发生异常时也发送完成通知
-                    with current_downloader_lock:
-                        downloader = current_downloader
-                        if downloader:
-                            stats = {
-                                'downloaded': downloader.downloaded_count,
-                                'failed': downloader.failed_count + 1,
-                                'skipped': downloader.skipped_count,
-                                'total': downloader.total_tasks
-                            }
-                            update_progress(
-                                downloaded=downloader.downloaded_count,
-                                total=downloader.total_tasks,
-                                completed=True,
-                                stats=stats
-                            )
-                        current_downloader = None
+                    logger.error(f"发送最终进度更新失败: {e}")
             
-            # 启动下载线程
-            download_thread = threading.Thread(target=start_download, daemon=True)
-            download_thread.start()
+            # 启动一个线程来监控下载完成
+            def monitor_download():
+                try:
+                    global current_downloader
+                    while True:
+                        time.sleep(1)
+                        with current_downloader_lock:
+                            if not current_downloader:
+                                break
+                        
+                        # 检查下载是否完成
+                        if current_downloader:
+                            # 检查任务队列是否为空且总任务数大于0
+                            # 注意：需要等待一段时间，确保任务添加线程已经完成任务添加
+                            if current_downloader.task_queue.empty() and current_downloader.total_tasks > 0:
+                                # 等待一小段时间确保所有线程都已完成
+                                time.sleep(2)
+                                # 再次检查任务队列是否仍然为空
+                                if current_downloader.task_queue.empty():
+                                    # 发送最终进度更新
+                                    send_final_update()
+                                    break
+                except Exception as e:
+                    logger.error(f"监控下载失败: {e}")
             
-            logger.info(f"下载任务启动: 总计={stats['total']} 个瓦片")
+            # 启动监控线程
+            threading.Thread(target=monitor_download, daemon=True).start()
             
-            # 返回初始状态，下载在后台进行
-            return jsonify({'success': True, 'stats': stats, 'message': '下载已启动'})
+            return jsonify({'success': True, 'message': '下载任务已开始'})
         except Exception as e:
-            logger.error(f"下载任务失败: {e}")
-            return jsonify({'error': f'Download failed: {e}'}), 500
-            
+            logger.error(f"下载请求处理失败: {e}")
+            return jsonify({'error': f'Failed to start download: {e}'}), 500
     except Exception as e:
         logger.error(f"API请求处理失败: {e}")
         return jsonify({'error': f'Request processing failed: {e}'}), 500
@@ -412,6 +440,97 @@ def api_download_status():
             'is_paused': False,
             'statistics': {'downloaded': 0, 'failed': 0, 'skipped': 0, 'total': 0}
         })
+
+@app.route('/api/config/save', methods=['POST'])
+def api_save_config():
+    """
+    保存参数配置
+    """
+    try:
+        if not request.is_json:
+            return jsonify({'error': 'Request must be JSON format'}), 400
+        
+        data = request.get_json()
+        
+        # 验证必填参数
+        if 'config_name' not in data:
+            return jsonify({'error': 'Missing required field: config_name'}), 400
+        
+        config_name = data['config_name']
+        config_data = data.get('config_data', {})
+        
+        # 生成配置文件名
+        config_filename = f"{config_name}.json"
+        config_path = os.path.join(app.config['CONFIG_FOLDER'], config_filename)
+        
+        # 保存配置数据
+        config = {
+            'name': config_name,
+            'timestamp': time.time(),
+            'data': config_data
+        }
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"配置已保存: {config_name}")
+        return jsonify({'success': True, 'message': '配置保存成功'})
+    except Exception as e:
+        logger.error(f"保存配置失败: {e}")
+        return jsonify({'error': f'Failed to save config: {e}'}), 500
+
+@app.route('/api/config/list', methods=['GET'])
+def api_list_configs():
+    """
+    获取配置列表
+    """
+    try:
+        configs = []
+        config_folder = app.config['CONFIG_FOLDER']
+        
+        if os.path.exists(config_folder):
+            for filename in os.listdir(config_folder):
+                if filename.endswith('.json'):
+                    config_path = os.path.join(config_folder, filename)
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                        configs.append({
+                            'name': config.get('name', filename[:-5]),
+                            'timestamp': config.get('timestamp', 0),
+                            'filename': filename
+                        })
+                    except Exception as e:
+                        logger.error(f"读取配置文件失败: {filename}, {e}")
+        
+        # 按时间戳排序，最新的在前
+        configs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        return jsonify({'success': True, 'configs': configs})
+    except Exception as e:
+        logger.error(f"获取配置列表失败: {e}")
+        return jsonify({'error': f'Failed to get config list: {e}'}), 500
+
+@app.route('/api/config/load/<config_name>', methods=['GET'])
+def api_load_config(config_name):
+    """
+    加载指定配置
+    """
+    try:
+        config_filename = f"{config_name}.json"
+        config_path = os.path.join(app.config['CONFIG_FOLDER'], config_filename)
+        
+        if not os.path.exists(config_path):
+            return jsonify({'error': 'Config not found'}), 404
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        logger.info(f"配置已加载: {config_name}")
+        return jsonify({'success': True, 'config': config})
+    except Exception as e:
+        logger.error(f"加载配置失败: {e}")
+        return jsonify({'error': f'Failed to load config: {e}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
